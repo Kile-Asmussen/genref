@@ -14,7 +14,7 @@
 //! 
 //! Caveat: the 'pointer' types are not actually pointers-as-such and do not support
 //! unsized types. Due to implementation details, having this kind of support would
-//! be largely detrimental to performance.
+//! probably be detrimental to performance.
 //! 
 //! 
 
