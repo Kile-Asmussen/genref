@@ -22,5 +22,7 @@ pub(crate) mod generations;
 pub(crate) mod allocator;
 pub mod pointers;
 
+#[allow(unused_imports)]
 use pointers::*;
+#[allow(unused_imports)]
 use allocator::{get_stats, get_global_stats};
