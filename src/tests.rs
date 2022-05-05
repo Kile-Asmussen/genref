@@ -10,7 +10,7 @@ fn generation_marker() {
     unsafe { alloc.upcast().unwrap().downcast::<i32>(2); }
     let gen2 = alloc.generation();
     assert_eq!(gen1 + 2, gen2);
-}
+} 
 
 #[test]
 fn allocation() {

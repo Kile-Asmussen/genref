@@ -16,7 +16,7 @@
 //! unsized types. Due to implementation details, having this kind of support would
 //! probably be detrimental to performance.
 //! 
-//! 
+//!   
 
 pub(crate) mod generations;
 pub(crate) mod allocator;

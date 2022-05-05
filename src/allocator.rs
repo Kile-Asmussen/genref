@@ -7,7 +7,7 @@ use parking_lot::Mutex;
 use super::generations::{FreePtr, Generation, GenerationLayout, InUsePtr};
 
 struct FreeListPool(HashMap<GenerationLayout, Vec<FreePtr>>);
-
+ 
 lazy_static! {
     static ref GLOBAL_POOL: Mutex<FreeListPool> = Mutex::new(FreeListPool(HashMap::new()));
 }

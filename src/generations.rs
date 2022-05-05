@@ -5,7 +5,7 @@ use std::{
 
 #[repr(C)]
 pub(crate) struct Generation<T: 'static>
-{
+{ 
     data: MaybeUninit<T>,
     gen: AtomicUsize,
 }
