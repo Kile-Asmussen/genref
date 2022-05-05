@@ -1,20 +1,22 @@
+use std::cell::Cell;
 
-use std::{cell::Cell};
-
-use crate::genref::{generations::InUsePtr, pointers::Owned, allocator};
+use crate::genref::{allocator, generations::InUsePtr, pointers::Owned};
 
 #[test]
-fn generation_marker() {
+fn generation_marker()
+{
     let alloc = InUsePtr::allocate(0);
     let gen1 = alloc.generation();
-    unsafe { alloc.upcast().unwrap().downcast::<i32>(2); }
+    unsafe {
+        alloc.upcast().unwrap().downcast::<i32>(2);
+    }
     let gen2 = alloc.generation();
     assert_eq!(gen1 + 2, gen2);
-} 
+}
 
 #[test]
-fn allocation() {
-
+fn allocation()
+{
     assert_eq!(allocator::get_stats().guards, 0);
 
     let x = Owned::new(Cell::new(2i32));
@@ -35,8 +37,11 @@ fn allocation() {
     assert_eq!(q.try_ref().map(|z| z.get()), Some(3));
 
     let x = match x.try_take() {
-        Ok(_) => { assert!(false, "impossible"); return },
-        Err(x) => x
+        Ok(_) => {
+            assert!(false, "impossible");
+            return;
+        }
+        Err(x) => x,
     };
 
     std::mem::drop(z);
@@ -44,7 +49,10 @@ fn allocation() {
 
     let _ = match x.try_take() {
         Ok(i) => i,
-        Err(_) => { assert!(false, "impossible"); return }
+        Err(_) => {
+            assert!(false, "impossible");
+            return;
+        }
     };
 
     assert!(y.try_ref().is_none());

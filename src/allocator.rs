@@ -1,10 +1,9 @@
-
+use super::generations::{FreePtr, Generation, GenerationLayout, InUsePtr};
+use lazy_static::lazy_static;
+use parking_lot::Mutex;
+use ref_thread_local::{ref_thread_local, RefThreadLocal};
 use std::mem;
 use std::{alloc::Layout, collections::HashMap, num::NonZeroUsize, ptr::NonNull};
-use lazy_static::lazy_static;
-use ref_thread_local::{ref_thread_local, RefThreadLocal};
-use parking_lot::Mutex;
-use super::generations::{FreePtr, Generation, GenerationLayout, InUsePtr};
 
 struct FreeListPool(HashMap<GenerationLayout, Vec<FreePtr>>);
 
