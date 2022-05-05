@@ -33,7 +33,7 @@ impl<T: 'static> Owned<T>
             gen: unsafe { NonZeroUsize::new_unchecked(self.ptr.generation()) }
         } 
     }
- 
+
     pub fn try_take(self) -> Result<T, Self> {
         try_free_and_take(self.ptr).ok_or(self)
     }
