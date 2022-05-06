@@ -146,24 +146,37 @@ impl LocalFreeListPool
     }
 }
 
+/// Heap memory usage statistics, for diagnosing memory leaks and the like.
 #[derive(Default)]
 pub struct Stats
 {
+    /// Available freed allocations by layout.
     pub by_layout: HashMap<GenerationLayout, usize>,
+
+    /// Allocations needing to be fried, prevented the presence of one or more
+    /// active `Guard`s.
     pub drop_queue_info: HashMap<GenerationLayout, usize>,
+
+    /// Number of active `Guard`s.
     pub guards: usize,
 }
 
+/// Heap memory usage for thread-local allocation pool.
 #[allow(dead_code)]
-pub fn get_stats() -> Stats { LOCAL_POOL.borrow().get_stats() }
+pub fn thread_local_stats() -> Stats { LOCAL_POOL.borrow().get_stats() }
 
+/// Heap memory usage for global allocation pool.
+///
+/// The global memory pool does not have a drop queue and do not track guards,
+/// so `drop_queue_info` is always empty and `guards` is always zero.
 #[allow(dead_code)]
-pub fn get_global_stats() -> Stats { GLOBAL_POOL.lock().get_stats() }
+pub fn global_stats() -> Stats { GLOBAL_POOL.lock().get_stats() }
 
+/// Collection of heap memory usage statistics.
 #[allow(dead_code)]
 impl Stats
 {
-    pub fn sum_sizes(map: &HashMap<GenerationLayout, usize>) -> usize
+    fn sum_sizes(map: &HashMap<GenerationLayout, usize>) -> usize
     {
         let mut res = 0;
         for (layout, amount) in map {
@@ -172,14 +185,21 @@ impl Stats
         res
     }
 
+    /// Number of freed allocations in this heap.
     pub fn free_objects(&self) -> usize { self.by_layout.values().sum() }
 
+    /// Memory size of freed allocations in this heap.
     pub fn free_heap_size(&self) -> usize { Self::sum_sizes(&self.by_layout) }
 
-    pub fn bound_heap_size(&self) -> usize { Self::sum_sizes(&self.drop_queue_info) }
-
+    /// Number of allocations waiting to be freed.
     pub fn bound_objects(&self) -> usize { self.drop_queue_info.values().sum() }
 
+    /// Memory size of allocations waiting to be freed.
+    pub fn bound_heap_size(&self) -> usize { Self::sum_sizes(&self.drop_queue_info) }
+
+    /// Approximate memory size of overhead objects: free lists and drop queue.
+    ///
+    /// Size of the internal hash tables is assumed to be negligible.
     pub fn overhead_size(&self) -> usize
     {
         self.drop_queue_info.values().sum::<usize>() * Layout::new::<DropLater>().size()

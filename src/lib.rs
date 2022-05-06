@@ -6,8 +6,6 @@
 //! libraries, I decided to provide it as a library for programming language
 //! design.
 //!
-//! In particular this is the memory model used in my upcoming project Aloxtalk.
-//!
 //! This crate provides managed pointer types `Uniq`, `Owned`, `Weak`, and
 //! `Guard`, as well as thread-local and global infrastructure for managing the
 //! allocations.
@@ -16,13 +14,30 @@
 //! support unsized types. Due to implementation details, having this kind of
 //! support would probably be detrimental to performance.
 //!
-//!   
+//! A generational allocation consists of a generation counter and the allocated
+//! data. The generation counter is only incremented when an allocation is freed
+//! (and the data thus `drop`ped.) Weak references keep a local copy of the
+//! generation for which they are valid, and are invalidated if their generation
+//! counter does not match that of their allocation.
+//!
+//! Allocations, by necessity, persist forever (they have `'static` lifetime)
+//! since a weak reference might persist indefinitely and check the generation
+//! count. Thus there are pathological cases where memory will leak,
+//! particularly if a thread allocates a very large number of objects, this will
+//! permanently increase the memory footprint of the program.
+//!
+//! Additionally if a generation counter would overflow, the allocation is
+//! instead leaked. This is however unlikely to be a problem as it requires
+//! allocating and freeing `usize::MAX` objects to leak one (1) allocation,
+//! which takes a nontrivial amount of time.
 
 pub(crate) mod allocator;
 pub(crate) mod generations;
-pub mod pointers;
+pub(crate) mod pointers;
 
 #[allow(unused_imports)]
-use allocator::{get_global_stats, get_stats};
+pub use allocator::{global_stats, thread_local_stats, Stats};
 #[allow(unused_imports)]
-use pointers::*;
+pub use generations::GenerationLayout;
+#[allow(unused_imports)]
+pub use pointers::*;

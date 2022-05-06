@@ -10,6 +10,16 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+/// Owned allocation.
+///
+/// This is the aliasable handle for a concrete allocated object. Has similar
+/// semantics to `Box` except in the case where there are active `Guard`s in the
+/// thread, in which case `drop` of the object will only run when there is
+/// nothing that can possibly access it.
+///
+/// Upon deallocation, the generation counter of the underlying allocation is
+/// incremented, invalidating all `Weak` references.
+
 #[repr(transparent)]
 #[derive(Debug)]
 
@@ -21,6 +31,9 @@ pub struct Owned<T: 'static>
 #[allow(dead_code)]
 impl<T: 'static> Owned<T>
 {
+    /// Allocate an object on the managed heap. Attempts to claim
+    /// a free object of appropriate layout from the heap, allocates new
+    /// if there is none available.
     pub fn new(it: T) -> Self
     {
         if let Some(fp) = reallocate::<T>() {
@@ -34,6 +47,7 @@ impl<T: 'static> Owned<T>
         }
     }
 
+    /// Produce a weak alias.
     pub fn alias(&self) -> Weak<T>
     {
         Weak {
@@ -42,8 +56,18 @@ impl<T: 'static> Owned<T>
         }
     }
 
+    /// Attempt to free the underlying allocation and return the allocated
+    /// object rather than dropping it.
+    ///
+    /// Fails if there are active `Guard`s.
     pub fn try_take(self) -> Result<T, Self> { try_free_and_take(self.ptr).ok_or(self) }
 
+    /// Attempt to ensure uniqueness of this reference by invalidating all
+    /// `Weak` references.
+    ///
+    /// Fails if there are active `Guard`s.
+    ///
+    /// Also avalable as `TryFrom<Owned<T>>` on `Uniq`.
     pub fn refine(self) -> Result<Uniq<T>, Self>
     {
         if guards_exist() {
@@ -72,14 +96,23 @@ impl<T: 'static> Drop for Owned<T>
     fn drop(&mut self) { free(self.ptr) }
 }
 
+/// A strongly unique reference to an allocated object.
+///
+/// `Uniq` is the _only_ way to to transfer generational references from
+/// one thread to another.
+#[repr(transparent)]
 pub struct Uniq<T: 'static>(Owned<T>);
 unsafe impl<T: 'static> Send for Uniq<T> {}
 
 #[allow(dead_code)]
 impl<T: 'static> Uniq<T>
 {
+    /// Allocate a new object on the managed heap. A wrapper for `Object::new`.
     pub fn new(it: T) -> Self { Uniq(Owned::new(it)) }
 
+    /// Remove uniqueness status of the reference to allow aliasing.
+    ///
+    /// Also available as `From<Uniq<T>>` for `Owned`.
     pub fn decay(self) -> Owned<T> { self.0 }
 }
 
@@ -102,6 +135,15 @@ impl<T: 'static> DerefMut for Uniq<T>
     fn deref_mut(&mut self) -> &mut Self::Target { unsafe { self.0.ptr.data_mut() } }
 }
 
+/// Weak reference to an allocation.
+///
+/// This reference type carries both a pointer and a local copy of the
+/// allocation's generation counter. When acessing the underlying allocation,
+/// the local generation count is compared to the allocation's generation. Only
+/// if the two match, is the reference still valid.
+///
+/// Compared to `Rc`, this type is `Copy`, under the assumption that references
+/// are copied more often than they are dereferenced.
 #[derive(Clone, Copy, Debug)]
 pub struct Weak<T: 'static>
 {
@@ -112,6 +154,9 @@ pub struct Weak<T: 'static>
 #[allow(dead_code)]
 impl<T: 'static> Weak<T>
 {
+    /// Attempt to reference the underlying allocated data.
+    ///
+    /// Returns `None` if the reference is no longer valid.
     pub fn try_ref(&self) -> Option<Guard<T>>
     {
         if self.gen.get() == self.ptr.generation() {
@@ -126,6 +171,10 @@ impl<T: 'static> Weak<T>
     }
 }
 
+/// An actual reference obtained through a `Weak` reference.
+///
+/// Prevents _any_ allocations owned by the local thread from
+/// invalidating weak references.
 #[repr(transparent)]
 #[derive(Debug)]
 pub struct Guard<'a, T: 'static>

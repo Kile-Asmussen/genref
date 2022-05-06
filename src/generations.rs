@@ -97,11 +97,19 @@ impl<T: 'static> InUsePtr<T>
     pub(crate) fn generation(&self) -> usize { unsafe { self.0.as_ref().generation() } }
 }
 
+/// Newtype wrapper to make `std::alloc::Layout` implement `Hash` for use in the
+/// managed heap.
+///
+/// Generational allocations are `#[repr(C)]` and store the generation counter
+/// _after_ the embedded data, in case the alignment of the data is greater than
+/// its in-memory size.
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct GenerationLayout(Layout);
 
 impl GenerationLayout
 {
+    /// Produces the layout of an generational allocation of `T`.
     pub fn of<T: 'static>() -> Self { GenerationLayout(Layout::new::<Generation<T>>()) }
 }
 
