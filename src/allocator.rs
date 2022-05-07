@@ -108,6 +108,15 @@ impl LocalFreeListPool
         }
     }
 
+    fn reset_requests(&mut self)
+    {
+        for (_, sz) in &mut self.request_sizes {
+            if sz.is_none() {
+                *sz = NonZeroUsize::new(32)
+            }
+        }
+    }
+
     unsafe fn free_now<T: 'static>(&mut self, it: InUsePtr<T>)
     {
         if let Some(it) = it.upcast() {
@@ -160,6 +169,10 @@ pub struct Stats
     /// Number of active `Guard`s.
     pub guards: usize,
 }
+
+/// Reset allocation behavior to request items from the global pool.
+#[allow(dead_code)]
+pub fn reset_request_behavior() { LOCAL_POOL.borrow_mut().reset_requests() }
 
 /// Heap memory usage for thread-local allocation pool.
 #[allow(dead_code)]
