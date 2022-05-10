@@ -40,7 +40,9 @@
 //!   objects will cause the memory footprint of the program to bloat.
 //! - Threads will attempt to request batches of free objects from the global
 //!   pool until such a time as the global pool is empty, and from then on will
-//!   allocate new or re-use only locally allocated objects. This
+//!   allocate new or re-use only locally allocated objects. This may lead to a
+//!   thread allocating new despite the global pool being glutted with free
+//!   objects.
 
 pub(crate) mod allocator;
 pub(crate) mod generations;
