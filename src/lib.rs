@@ -44,9 +44,16 @@
 //!   thread allocating new despite the global pool being glutted with free
 //!   objects.
 
+#[macro_use]
+#[allow(unused_macros)]
+pub(crate) mod debug;
 pub(crate) mod allocator;
 pub(crate) mod generations;
 pub(crate) mod pointers;
+
+#[cfg(test)]
+#[allow(unused_imports)]
+mod tests;
 
 #[allow(unused_imports)]
 pub use allocator::{global_stats, reset_request_behavior, thread_local_stats, Stats};
