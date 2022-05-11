@@ -1,10 +1,14 @@
+use crate::allocator::{free_and_take_unchecked, free_unchecked};
+
 use super::{
     allocator::{
-        deregister_guard, free, guards_exist, reallocate, register_guard, try_free_and_take,
+        allocate, free, guard_no_longer_in_use, guard_now_in_use, guards_exist, try_free_and_take,
     },
     generations::InUsePtr,
 };
 use std::{
+    any::type_name,
+    fmt,
     marker::PhantomData,
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
@@ -21,8 +25,6 @@ use std::{
 /// incremented, invalidating all `Weak` references.
 
 #[repr(transparent)]
-#[derive(Debug)]
-
 pub struct Owned<T: 'static>
 {
     ptr: InUsePtr<T>,
@@ -36,15 +38,8 @@ impl<T: 'static> Owned<T>
     /// if there is none available.
     pub fn new(it: T) -> Self
     {
-        if let Some(fp) = reallocate::<T>() {
-            Owned {
-                ptr: unsafe { fp.downcast(it) },
-            }
-        } else {
-            Owned {
-                ptr: InUsePtr::allocate(it),
-            }
-        }
+        dbg_call!("Owned::<{}>::new()", type_name::<T>());
+        dbg_return!("{:?}", Uniq::new(it).decay())
     }
 
     /// Produce a weak alias.
@@ -59,13 +54,21 @@ impl<T: 'static> Owned<T>
     /// Attempt to free the underlying allocation and return the allocated
     /// object rather than dropping it.
     ///
-    /// Fails if there are active `Guard`s.
-    pub fn try_take(self) -> Result<T, Self> { try_free_and_take(self.ptr).ok_or(self) }
+    /// Fails if there are live `Guard`s.
+    pub fn try_into_inner(self) -> Result<T, Self>
+    {
+        if let Some(it) = try_free_and_take(self.ptr) {
+            std::mem::forget(self);
+            Ok(it)
+        } else {
+            Err(self)
+        }
+    }
 
     /// Attempt to ensure uniqueness of this reference by invalidating all
     /// `Weak` references.
     ///
-    /// Fails if there are active `Guard`s.
+    /// Fails if there are live `Guard`s.
     ///
     /// Also avalable as `TryFrom<Owned<T>>` on `Uniq`.
     pub fn refine(self) -> Result<Uniq<T>, Self>
@@ -73,8 +76,10 @@ impl<T: 'static> Owned<T>
         if guards_exist() {
             Err(self)
         } else {
-            self.ptr.invalidate_weak();
-            Ok(Uniq(self))
+            self.ptr.invalidate_weaks();
+            let ptr = self.ptr;
+            std::mem::forget(self);
+            Ok(Uniq { ptr })
         }
     }
 }
@@ -93,7 +98,22 @@ impl<T: 'static> From<Uniq<T>> for Owned<T>
 
 impl<T: 'static> Drop for Owned<T>
 {
-    fn drop(&mut self) { free(self.ptr) }
+    fn drop(&mut self)
+    {
+        //dbg_call!("Owned::<{}>.drop()", type_name::<T>());
+        unsafe {
+            free(self.ptr);
+        }
+        //dbg_return!();
+    }
+}
+
+impl<T: 'static> fmt::Debug for Owned<T>
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
+    {
+        f.debug_struct("Owned").field("ptr", &self.ptr).finish()
+    }
 }
 
 /// A strongly unique reference to an allocated object.
@@ -101,19 +121,51 @@ impl<T: 'static> Drop for Owned<T>
 /// `Uniq` is the _only_ way to to transfer generational references from
 /// one thread to another.
 #[repr(transparent)]
-pub struct Uniq<T: 'static>(Owned<T>);
+pub struct Uniq<T: 'static>
+{
+    ptr: InUsePtr<T>,
+}
 unsafe impl<T: 'static> Send for Uniq<T> {}
 
 #[allow(dead_code)]
 impl<T: 'static> Uniq<T>
 {
     /// Allocate a new object on the managed heap. A wrapper for `Object::new`.
-    pub fn new(it: T) -> Self { Uniq(Owned::new(it)) }
+    pub fn new(it: T) -> Self
+    {
+        //dbg_call!("Uniq::<{}>::new(_)", type_name::<T>());
+        let res = if let Some(fp) = allocate::<T>() {
+            Self {
+                ptr: unsafe { fp.downcast(it) },
+            }
+        } else {
+            Self {
+                ptr: InUsePtr::allocate(it),
+            }
+        };
+        //dbg_return!("{:?}", res);
+        res
+    }
 
     /// Remove uniqueness status of the reference to allow aliasing.
     ///
     /// Also available as `From<Uniq<T>>` for `Owned`.
-    pub fn decay(self) -> Owned<T> { self.0 }
+    pub fn decay(self) -> Owned<T>
+    {
+        let ptr = self.ptr;
+        std::mem::forget(self);
+        Owned { ptr }
+    }
+
+    /// Free allocation and return data content
+    ///
+    /// Cannot fail since there are no weak references
+    pub fn into_inner(self) -> T
+    {
+        let ptr = self.ptr;
+        std::mem::forget(self);
+        unsafe { free_and_take_unchecked(ptr) }
+    }
 }
 
 impl<T: 'static> TryFrom<Owned<T>> for Uniq<T>
@@ -127,12 +179,30 @@ impl<T: 'static> Deref for Uniq<T>
 {
     type Target = <Owned<T> as Deref>::Target;
 
-    fn deref(&self) -> &Self::Target { self.0.deref() }
+    fn deref(&self) -> &Self::Target { unsafe { self.ptr.data_ref() } }
 }
 
 impl<T: 'static> DerefMut for Uniq<T>
 {
-    fn deref_mut(&mut self) -> &mut Self::Target { unsafe { self.0.ptr.data_mut() } }
+    fn deref_mut(&mut self) -> &mut Self::Target { unsafe { self.ptr.data_mut() } }
+}
+
+impl<T: 'static> Drop for Uniq<T>
+{
+    fn drop(&mut self)
+    {
+        //dbg_call!("Uniq::<{}>.drop()", type_name::<T>());
+        unsafe { free_unchecked(self.ptr) }
+        //dbg_return!();
+    }
+}
+
+impl<T: 'static> fmt::Debug for Uniq<T>
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
+    {
+        f.debug_struct("Uniq").field("ptr", &self.ptr).finish()
+    }
 }
 
 /// Weak reference to an allocation.
@@ -144,7 +214,7 @@ impl<T: 'static> DerefMut for Uniq<T>
 ///
 /// Compared to `Rc`, this type is `Copy`, under the assumption that references
 /// are copied more often than they are dereferenced.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct Weak<T: 'static>
 {
     ptr: InUsePtr<T>,
@@ -160,7 +230,7 @@ impl<T: 'static> Weak<T>
     pub fn try_ref(&self) -> Option<Guard<T>>
     {
         if self.gen.get() == self.ptr.generation() {
-            register_guard();
+            guard_now_in_use();
             Some(Guard {
                 ptr: self.ptr,
                 _phantom: PhantomData,
@@ -171,12 +241,22 @@ impl<T: 'static> Weak<T>
     }
 }
 
+impl<T: 'static> fmt::Debug for Weak<T>
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
+    {
+        f.debug_struct("Weak")
+            .field("ptr", &self.ptr)
+            .field("gen", &self.gen)
+            .finish()
+    }
+}
+
 /// An actual reference obtained through a `Weak` reference.
 ///
 /// Prevents _any_ allocations owned by the local thread from
 /// invalidating weak references.
 #[repr(transparent)]
-#[derive(Debug)]
 pub struct Guard<'a, T: 'static>
 {
     ptr: InUsePtr<T>,
@@ -187,7 +267,7 @@ impl<'a, T: 'static> Clone for Guard<'a, T>
 {
     fn clone(&self) -> Self
     {
-        register_guard();
+        guard_now_in_use();
         Guard {
             ptr: self.ptr,
             _phantom: PhantomData,
@@ -197,7 +277,7 @@ impl<'a, T: 'static> Clone for Guard<'a, T>
 
 impl<'a, T: 'static> Drop for Guard<'a, T>
 {
-    fn drop(&mut self) { deregister_guard() }
+    fn drop(&mut self) { guard_no_longer_in_use() }
 }
 
 impl<'a, T: 'static> Deref for Guard<'a, T>
@@ -205,4 +285,12 @@ impl<'a, T: 'static> Deref for Guard<'a, T>
     type Target = T;
 
     fn deref(&self) -> &Self::Target { unsafe { self.ptr.data_ref() } }
+}
+
+impl<'a, T: 'static> fmt::Debug for Guard<'a, T>
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
+    {
+        f.debug_struct("Guard").field("ptr", &self.ptr).finish()
+    }
 }
