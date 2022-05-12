@@ -8,7 +8,6 @@ edition = "2021"
 [dependencies]
 lazy_static = "1.4.0"
 parking_lot = { version = "0.12.0", features = ["nightly"] }
-ref_thread_local = "0.1.1"
- 
+
 [toolchain]
 channel = "nightly"
