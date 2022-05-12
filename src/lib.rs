@@ -44,6 +44,8 @@
 //!   thread allocating new despite the global pool being glutted with free
 //!   objects.
 
+#![feature(assert_matches)]
+
 #[macro_use]
 #[allow(unused_macros, dead_code)]
 pub(crate) mod debug;

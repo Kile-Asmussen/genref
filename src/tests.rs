@@ -1,3 +1,4 @@
+use std::assert_matches::assert_matches;
 use std::cell::Cell;
 
 use crate::allocator::*;
@@ -119,6 +120,8 @@ fn guards_delay_drop()
     std::mem::drop(thing);
 
     assert_eq!(cell.get(), 2);
+
+    assert_matches!(ref_of.try_ref(), None);
 
     std::mem::drop(ref_of);
 
