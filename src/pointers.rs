@@ -7,7 +7,7 @@ use super::{
     generations::InUsePtr,
 };
 use std::{
-    any::type_name,
+    // any::type_name,
     fmt,
     marker::PhantomData,
     num::NonZeroUsize,
@@ -38,8 +38,10 @@ impl<T: 'static> Owned<T>
     /// if there is none available.
     pub fn new(it: T) -> Self
     {
-        dbg_call!("Owned::<{}>::new()", type_name::<T>());
-        dbg_return!("{:?}", Uniq::new(it).decay())
+        //dbg_call!("Owned::<{}>::new()", type_name::<T>());
+        //dbg_return!("{:?}",
+        Uniq::new(it).decay()
+        //)
     }
 
     /// Produce a weak alias.
@@ -229,13 +231,14 @@ impl<T: 'static> Weak<T>
     /// Returns `None` if the reference is no longer valid.
     pub fn try_ref(&self) -> Option<Guard<T>>
     {
+        guard_now_in_use();
         if self.gen.get() == self.ptr.generation() {
-            guard_now_in_use();
             Some(Guard {
                 ptr: self.ptr,
                 _phantom: PhantomData,
             })
         } else {
+            guard_no_longer_in_use();
             None
         }
     }
