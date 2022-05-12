@@ -1,5 +1,7 @@
 use std::assert_matches::assert_matches;
 use std::cell::Cell;
+use std::mem::size_of;
+use std::ops::Add;
 
 use crate::allocator::*;
 use crate::generations::*;
@@ -14,7 +16,7 @@ fn user_story()
 
     let y = x.alias();
 
-    let z = y.try_ref();
+    let z = y.try_deref();
 
     assert!(z.is_some());
 
@@ -28,7 +30,7 @@ fn user_story()
 
     let q = x.alias();
 
-    assert_eq!(q.try_ref().map(|z| z.get()), Some(3));
+    assert_eq!(q.try_deref().map(|z| z.get()), Some(3));
 
     let x = match x.try_into_inner() {
         Ok(_) => {
@@ -50,7 +52,7 @@ fn user_story()
         }
     };
 
-    assert!(y.try_ref().is_none());
+    assert!(y.try_deref().is_none());
 
     assert!(!thread_local_stats().by_layout.is_empty());
 }
@@ -121,7 +123,7 @@ fn guards_delay_drop()
 
     assert_eq!(cell.get(), 2);
 
-    assert_matches!(ref_of.try_ref(), None);
+    assert_matches!(ref_of.try_deref(), None);
 
     std::mem::drop(ref_of);
 
@@ -129,7 +131,7 @@ fn guards_delay_drop()
 
     let ref_of = thing.alias();
 
-    let guard = ref_of.try_ref().unwrap();
+    let guard = ref_of.try_deref().unwrap();
 
     assert_eq!(cell.get(), 2);
 
@@ -144,4 +146,61 @@ fn guards_delay_drop()
     assert_eq!(thread_local_stats().guards, 0);
 
     assert_eq!(cell.get(), 3);
+}
+
+#[test]
+fn genref_is_compact()
+{
+    assert_eq!(size_of::<GenRef<i32>>(), size_of::<Weak<i32>>());
+}
+
+#[test]
+fn address_persistene()
+{
+    let u = Uniq::new(1);
+    let ua = u.addr();
+    let o = u.decay();
+    let oa = o.addr();
+    let w = o.alias();
+    let wa = w.addr();
+    let g = w.try_deref().unwrap();
+    let ga = g.addr();
+
+    assert_eq!(ua, oa);
+    assert_eq!(oa, wa);
+    assert_eq!(wa, ga);
+}
+
+#[test]
+fn genref_genenum_roundtrip()
+{
+    assert_eq!(size_of::<GenRef<i32>>(), size_of::<Weak<i32>>());
+
+    assert_matches!(
+        GenEnum::from(Owned::new(1)).into_ref().into_enum(),
+        GenEnum::Owned(_)
+    );
+
+    let o = Owned::new(1);
+    let oa = o.addr().get();
+    assert_eq!(GenRef::from(o).into_enum().addr(), oa);
+
+    assert_matches!(
+        GenEnum::from(Uniq::new(1)).into_ref().into_enum(),
+        GenEnum::Uniq(_)
+    );
+
+    let u = Uniq::new(1);
+    let ua = u.addr().get();
+    assert_eq!(GenRef::from(u).into_enum().addr(), ua);
+
+    assert_matches!(
+        GenEnum::from(Owned::new(1).alias()).into_ref().into_enum(),
+        GenEnum::Weak(_)
+    );
+
+    let o = Owned::new(1);
+    let w = o.alias();
+    let wa = w.addr().get();
+    assert_eq!(GenRef::from(w).into_enum().addr(), wa);
 }
