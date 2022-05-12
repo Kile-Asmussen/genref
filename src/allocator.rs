@@ -102,12 +102,13 @@ impl LocalFreeListPool
         let guards = self.guards.get() - 1;
         // dbg_println!("guards = {}", guards);
         self.guards.set(guards);
+        self.purge_drop_queue();
         // dbg_return!();
     }
 
     fn reclaim<T: 'static>(&self, it: InUsePtr<T>)
     {
-        //dbg_call!("LocalFreeListPool.reclaim<{}>({:?})", type_name::<T>(), it);
+        // dbg_call!("LocalFreeListPool.reclaim<{}>({:?})", type_name::<T>(), it);
         if self.is_safe() {
             unsafe {
                 self.free_now(it);
@@ -115,7 +116,7 @@ impl LocalFreeListPool
         } else {
             self.drop_later(it);
         }
-        //dbg_return!();
+        // dbg_return!();
     }
 
     fn reallocate<T: 'static>(&self) -> Option<FreePtr>
@@ -149,36 +150,43 @@ impl LocalFreeListPool
 
     fn drop_later<T: 'static>(&self, it: InUsePtr<T>)
     {
-        //dbg_println!("LocalFreeListPool.drop_later::<{}>()", type_name::<T>());
+        // dbg_call!(
+        //     "LocalFreeListPool.drop_later::<{}>({:?})",
+        //     type_name::<T>(),
+        //     it
+        // );
         self.dropq.borrow_mut().push(DropLater::new(it));
         *self
             .dropq_info
             .borrow_mut()
             .entry(GenerationLayout::of::<T>())
             .or_default() += 1;
+        // dbg_return!();
     }
 
     fn purge_drop_queue(&self)
     {
-        //dbg_call!("LocalFreeListPool.purge_drop_queue");
+        // dbg_call!("LocalFreeListPool.purge_drop_queue");
         if self.is_safe() {
             if !self.dropq.borrow().is_empty() {
-                //dbg_println!("purging drop queue");
                 let mut dropq = Vec::new();
                 mem::swap(&mut dropq, &mut self.dropq.borrow_mut());
+                //dbg_println!("purging drop queue of {} elements", dropq.len());
+                let mut pool = self.pool.borrow_mut();
                 for dq in dropq.drain(..) {
-                    dq.drop_it(&mut self.pool.borrow_mut())
+                    dq.drop_it(&mut pool)
                 }
+                std::mem::drop(pool);
                 self.dropq_info.borrow_mut().clear();
             } else {
-                //dbg_println!("drop queue empty");
+                // dbg_println!("drop queue empty");
             }
         } else if !self.dropq.borrow().is_empty() {
-            //dbg_println!("unsafe to purge");
+            // dbg_println!("unsafe to purge");
         } else {
-            //dbg_println!("nothing to purge");
+            // dbg_println!("nothing to purge");
         }
-        //dbg_return!();
+        // dbg_return!();
     }
 
     fn reset_requests(&self)
@@ -199,7 +207,7 @@ impl LocalFreeListPool
         // );
         it.invalidate_weaks();
         self.free_now_unchecked(it);
-        //dbg_return!();
+        // dbg_return!();
     }
 
     unsafe fn free_now_unchecked<T: 'static>(&self, it: InUsePtr<T>)
@@ -210,14 +218,14 @@ impl LocalFreeListPool
         //     it
         // );
         if let Some(it) = it.upcast() {
-            self.free_dynamic(GenerationLayout::of::<T>(), it)
+            self.free_directly(GenerationLayout::of::<T>(), it)
         }
         // dbg_return!();
     }
 
-    unsafe fn free_dynamic(&self, layout: GenerationLayout, it: FreePtr)
+    unsafe fn free_directly(&self, layout: GenerationLayout, it: FreePtr)
     {
-        // dbg_call!("LocalFreeListPool.free_dynamic({:?}, {:?})", layout, it);
+        // dbg_call!("LocalFreeListPool.free_directly({:?}, {:?})", layout, it);
         self.pool.borrow_mut().free_list(layout).push(it);
         // dbg_return!();
     }
@@ -356,7 +364,7 @@ pub(crate) unsafe fn free_and_take_unchecked<T: 'static>(it: InUsePtr<T>) -> T
     it.invalidate_weaks();
     let (res, it) = it.upcast_take();
     if let Some(it) = it {
-        LOCAL_POOL.with(|x| x.free_dynamic(GenerationLayout::of::<T>(), it));
+        LOCAL_POOL.with(|x| x.free_directly(GenerationLayout::of::<T>(), it));
     }
     // dbg_return!("_ : {}", type_name::<T>());
     res
@@ -401,8 +409,14 @@ impl DropLater
 
     unsafe fn drop_function<T: 'static>(ptr: NonNull<Generation<()>>, flp: &mut FreeListPool)
     {
+        // dbg_call!(
+        //     "DropLater::drop_function::<{}>({:?}, _)",
+        //     type_name::<T>(),
+        //     ptr
+        // );
         if let Some(it) = InUsePtr::<T>(ptr.cast()).upcast() {
             flp.free_list_of::<T>().push(it)
         }
+        // dbg_return!();
     }
 }
