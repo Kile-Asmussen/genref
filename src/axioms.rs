@@ -242,7 +242,7 @@ impl Axioms
     /// ```
     ///
     /// All axioms are weakly increasing in `self.invalid_weak`.
-    pub fn bump_generation(mut self) -> Self
+    pub fn invalidate(mut self) -> Self
     {
         self.invalid_weak += self.valid_weak;
         self.valid_weak = 0;
@@ -258,7 +258,7 @@ impl Axioms
     ///     .malloc()
     ///     .decay()
     ///     .alias(100)
-    ///     .bump_generation()
+    ///     .invalidate()
     ///     .promote()
     ///     .deinit()
     ///     .leak()
@@ -275,7 +275,7 @@ impl Axioms
             .malloc()
             .decay()
             .alias(100)
-            .bump_generation()
+            .invalidate()
             .promote()
             .deinit()
             .leak()
