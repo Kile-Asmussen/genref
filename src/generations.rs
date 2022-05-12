@@ -4,6 +4,7 @@ use std::{
     fmt,
     hash::{self, Hasher},
     mem::MaybeUninit,
+    num::NonZeroUsize,
     ptr::NonNull,
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -27,10 +28,11 @@ impl<T: 'static> Generation<T>
 
     fn bump_generation(&self) { self.gen.fetch_add(1, Ordering::Relaxed); }
 
-    fn is_end_of_life(&self) -> bool { self.generation() == usize::MAX }
+    fn is_end_of_life(&self) -> bool { self.generation() >= usize::MAX - 1 }
 }
 
 #[derive(Clone, Copy)]
+#[repr(transparent)]
 pub(crate) struct FreePtr(pub(crate) NonNull<Generation<()>>);
 
 impl FreePtr
@@ -54,7 +56,9 @@ impl fmt::Debug for FreePtr
     }
 }
 
-pub(crate) struct InUsePtr<T: 'static>(pub(crate) NonNull<Generation<T>>);
+/// Underlying pointer type
+#[repr(transparent)]
+pub struct InUsePtr<T: 'static>(pub(crate) NonNull<Generation<T>>);
 
 impl<T: 'static> Clone for InUsePtr<T>
 {
@@ -85,31 +89,45 @@ impl<T: 'static> InUsePtr<T>
         //,type_name::<T>() )
     }
 
-    pub(crate) unsafe fn upcast(self) -> Option<FreePtr>
+    pub(crate) unsafe fn upcast(mut self) -> Option<FreePtr>
     {
-        let mut ptr = self.0;
-        let alloc = ptr.as_mut();
-        let res = if alloc.is_end_of_life() {
-            None
+        let res = if self.invalidatable_at_least_once_more() {
+            Some(FreePtr(self.0.cast()))
         } else {
-            Some(FreePtr(ptr.cast()))
+            None
         };
-        alloc.drop_data();
+        self.invalidate();
+        self.0.as_mut().drop_data();
         res
     }
 
-    pub(crate) fn invalidate_weaks(&self) { unsafe { self.0.as_ref().bump_generation() } }
-
-    pub(crate) unsafe fn upcast_take(self) -> (T, Option<FreePtr>)
+    pub(crate) unsafe fn upcast_unchecked(mut self) -> Option<FreePtr>
     {
-        let mut ptr = self.0;
-        let alloc = ptr.as_mut();
-        let res = if alloc.is_end_of_life() {
-            Some(FreePtr(ptr.cast()))
+        let res = if self.invalidatable_at_least_once_more() {
+            Some(FreePtr(self.0.cast()))
         } else {
             None
         };
-        let t = alloc.take_data();
+        self.0.as_mut().drop_data();
+        res
+    }
+
+    pub(crate) fn invalidatable_at_least_once_more(&self) -> bool
+    {
+        unsafe { !self.0.as_ref().is_end_of_life() }
+    }
+
+    pub(crate) unsafe fn invalidate(&self) { self.0.as_ref().bump_generation() }
+
+    pub(crate) unsafe fn upcast_take(mut self) -> (T, Option<FreePtr>)
+    {
+        let res = if self.invalidatable_at_least_once_more() {
+            Some(FreePtr(self.0.cast()))
+        } else {
+            None
+        };
+        self.invalidate();
+        let t = self.0.as_mut().take_data();
         (t, res)
     }
 
@@ -118,6 +136,15 @@ impl<T: 'static> InUsePtr<T>
     pub(crate) unsafe fn data_mut(&mut self) -> &mut T { self.0.as_mut().data.assume_init_mut() }
 
     pub(crate) fn generation(&self) -> usize { unsafe { self.0.as_ref().generation() } }
+
+    #[cfg(not(target_feature = "strict_provenance"))]
+    pub(crate) fn addr(&self) -> NonZeroUsize
+    {
+        unsafe { NonZeroUsize::new_unchecked(self.0.as_ptr() as usize) }
+    }
+
+    #[cfg(target_feature = "strict_provenance")]
+    pub(crate) fn addr(&self) -> NonZeroUsize { self.0.addr() }
 }
 
 /// Newtype wrapper to make `std::alloc::Layout` implement `Hash` for use in the
