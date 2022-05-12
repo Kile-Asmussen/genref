@@ -351,7 +351,15 @@ impl<T: 'static> GenEnum<T>
         }
     }
 
-    pub fn uniq(self) -> Uniq<T> { todo!() }
+    pub fn uniq(self) -> Uniq<T>
+    {
+        match self {
+            GenEnum::Weak(_) => panic!("unique reference expected"),
+            GenEnum::Owned(o) => o.promote().expect("cannot promote owned reference"),
+            GenEnum::Uniq(u) => u,
+            GenEnum::Nil => panic!("unique reference expected"),
+        }
+    }
 
     pub(crate) fn addr(&self) -> usize
     {
@@ -447,6 +455,8 @@ impl<T: 'static> Debug for PtrOrGen<T>
             .finish()
     }
 }
+
+// These two need to be exact mirrors of each other:
 
 impl<T: 'static> GenEnum<T>
 {
