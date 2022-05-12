@@ -8,7 +8,7 @@ use super::{
 };
 use std::{
     // any::type_name,
-    fmt,
+    fmt::{self, Debug},
     marker::PhantomData,
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
@@ -76,12 +76,18 @@ impl<T: 'static> Owned<T>
         if guards_exist() {
             Err(self)
         } else {
-            self.ptr.invalidate_weaks();
-            let ptr = self.ptr;
-            std::mem::forget(self);
-            Ok(Uniq { ptr })
+            if self.ptr.invalidatable_at_least_once_more() {
+                unsafe { self.ptr.invalidate() }
+                let ptr = self.ptr;
+                std::mem::forget(self);
+                Ok(Uniq { ptr })
+            } else {
+                Err(self)
+            }
         }
     }
+
+    pub(crate) fn addr(&self) -> NonZeroUsize { self.ptr.addr() }
 }
 
 impl<T: 'static> Deref for Owned<T>
@@ -168,6 +174,8 @@ impl<T: 'static> Uniq<T>
         std::mem::forget(self);
         unsafe { free_and_take_unchecked(ptr) }
     }
+
+    pub(crate) fn addr(&self) -> NonZeroUsize { self.ptr.addr() }
 }
 
 impl<T: 'static> TryFrom<Owned<T>> for Uniq<T>
@@ -229,7 +237,7 @@ impl<T: 'static> Weak<T>
     /// Attempt to reference the underlying allocated data.
     ///
     /// Returns `None` if the reference is no longer valid.
-    pub fn try_ref(&self) -> Option<Guard<T>>
+    pub fn try_deref(&self) -> Option<Guard<T>>
     {
         guard_now_in_use();
         if self.gen.get() == self.ptr.generation() {
@@ -242,6 +250,8 @@ impl<T: 'static> Weak<T>
             None
         }
     }
+
+    pub(crate) fn addr(&self) -> NonZeroUsize { self.ptr.addr() }
 }
 
 impl<T: 'static> fmt::Debug for Weak<T>
@@ -264,6 +274,11 @@ pub struct Guard<'a, T: 'static>
 {
     ptr: InUsePtr<T>,
     _phantom: PhantomData<&'a ()>,
+}
+
+impl<'a, T: 'static> Guard<'a, T>
+{
+    pub(crate) fn addr(&self) -> NonZeroUsize { self.ptr.addr() }
 }
 
 impl<'a, T: 'static> Clone for Guard<'a, T>
@@ -295,5 +310,197 @@ impl<'a, T: 'static> fmt::Debug for Guard<'a, T>
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
     {
         f.debug_struct("Guard").field("ptr", &self.ptr).finish()
+    }
+}
+
+/// Union of all kinds of generational references, used as a do-work-format
+/// for `GenRef`.
+#[derive(Debug)]
+pub enum GenEnum<T: 'static>
+{
+    Weak(Weak<T>),
+    Owned(Owned<T>),
+    Uniq(Uniq<T>),
+
+    /// Mostly semantically equivalent to an invalid weak reference.
+    Nil,
+}
+
+impl<T: 'static> GenEnum<T>
+{
+    /// Converts into `GenRef` for compact storage.
+    pub fn into_ref(self) -> GenRef<T>
+    {
+        let ptr_or_gen: PtrOrGen<T>;
+        let ptr: Option<InUsePtr<T>>;
+        match self {
+            GenEnum::Weak(w) => {
+                ptr_or_gen = PtrOrGen { gen: Some(w.gen) };
+                ptr = Some(w.ptr);
+            }
+            GenEnum::Owned(o) => {
+                ptr_or_gen = PtrOrGen { ptr: Some(o.ptr) };
+                ptr = Some(o.ptr);
+            }
+            GenEnum::Uniq(u) => {
+                ptr_or_gen = PtrOrGen { ptr: Some(u.ptr) };
+                ptr = None;
+            }
+            GenEnum::Nil => {
+                ptr_or_gen = PtrOrGen { gen: None };
+                ptr = None;
+            }
+        }
+        GenRef { ptr_or_gen, ptr }
+    }
+
+    /// Attempt to dereference.
+    ///
+    /// Returns `Err(None)` both for `Nil` and invalid weak references.
+    pub fn try_deref(&self) -> Result<&T, Option<Guard<T>>>
+    {
+        match self {
+            GenEnum::Weak(w) => Err(w.try_deref()),
+            GenEnum::Owned(o) => Ok(o.deref()),
+            GenEnum::Uniq(u) => Ok(u.deref()),
+            GenEnum::Nil => Err(None),
+        }
+    }
+
+    pub fn owned(self) -> Owned<T>
+    {
+        match self {
+            GenEnum::Weak(_) => panic!("owned reference expected"),
+            GenEnum::Owned(o) => o,
+            GenEnum::Uniq(u) => u.decay(),
+            GenEnum::Nil => panic!("owned reference expected"),
+        }
+    }
+
+    pub fn uniq(self) -> Uniq<T> { todo!() }
+
+    pub(crate) fn addr(&self) -> usize
+    {
+        match self {
+            GenEnum::Weak(w) => w.addr().get(),
+            GenEnum::Owned(o) => o.addr().get(),
+            GenEnum::Uniq(u) => u.addr().get(),
+            GenEnum::Nil => 0,
+        }
+    }
+}
+
+impl<T: 'static> From<Owned<T>> for GenEnum<T>
+{
+    fn from(it: Owned<T>) -> Self { GenEnum::Owned(it) }
+}
+
+impl<T: 'static> From<Uniq<T>> for GenEnum<T>
+{
+    fn from(it: Uniq<T>) -> Self { GenEnum::Uniq(it) }
+}
+
+impl<T: 'static> From<Weak<T>> for GenEnum<T>
+{
+    fn from(it: Weak<T>) -> Self { GenEnum::Weak(it) }
+}
+
+impl<T: 'static> From<GenRef<T>> for GenEnum<T>
+{
+    fn from(it: GenRef<T>) -> Self { it.into_enum() }
+}
+
+/// Union of `Weak`, `Owned`, and `Uniq`.
+#[derive(Debug)]
+#[cfg(not(target_feature = "strict_provenance"))]
+pub struct GenRef<T: 'static>
+{
+    ptr_or_gen: PtrOrGen<T>,
+    ptr: Option<InUsePtr<T>>,
+}
+
+impl<T: 'static> GenRef<T>
+{
+    /// Converts into `GenEnum` to perform operations on the contained
+    /// reference.
+    pub fn into_enum(self) -> GenEnum<T>
+    {
+        unsafe {
+            let res = match self {
+                GenRef {
+                    ptr_or_gen: PtrOrGen { ptr: None },
+                    ptr: None,
+                } => GenEnum::Nil,
+                GenRef {
+                    ptr_or_gen: PtrOrGen { gen: None },
+                    ptr: Some(ptr),
+                } => GenEnum::Owned(Owned { ptr }),
+                GenRef {
+                    ptr_or_gen: PtrOrGen { ptr: Some(ptr) },
+                    ptr: None,
+                } => GenEnum::Uniq(Uniq { ptr }),
+                GenRef {
+                    ptr_or_gen: PtrOrGen { gen: Some(gen) },
+                    ptr: Some(ptr),
+                } => GenEnum::Weak(Weak { gen, ptr }),
+            };
+            std::mem::forget(self);
+            res
+        }
+    }
+}
+
+impl<T: 'static> Drop for GenRef<T>
+{
+    fn drop(&mut self)
+    {
+        let mut swap = GenEnum::Nil.into_ref();
+        std::mem::swap(self, &mut swap);
+        swap.into_enum();
+    }
+}
+
+impl<T: 'static> From<GenEnum<T>> for GenRef<T>
+{
+    fn from(it: GenEnum<T>) -> Self { it.into_ref() }
+}
+
+impl<T: 'static> From<Weak<T>> for GenRef<T>
+{
+    fn from(it: Weak<T>) -> Self { GenEnum::from(it).into_ref() }
+}
+
+impl<T: 'static> From<Owned<T>> for GenRef<T>
+{
+    fn from(it: Owned<T>) -> Self { GenEnum::from(it).into_ref() }
+}
+
+impl<T: 'static> From<Uniq<T>> for GenRef<T>
+{
+    fn from(it: Uniq<T>) -> Self { GenEnum::from(it).into_ref() }
+}
+
+#[derive(Clone, Copy)]
+union PtrOrGen<T: 'static>
+{
+    ptr: Option<InUsePtr<T>>,
+    gen: Option<NonZeroUsize>,
+}
+
+impl<T: 'static> Debug for PtrOrGen<T>
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
+    {
+        f.debug_struct("PtrOrGen")
+            .field(
+                "ptr/gen",
+                &format!("{:x}", unsafe {
+                    match self.gen {
+                        None => 0,
+                        Some(g) => g.get(),
+                    }
+                }),
+            )
+            .finish()
     }
 }
