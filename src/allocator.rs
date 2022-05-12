@@ -155,6 +155,7 @@ impl LocalFreeListPool
         //     type_name::<T>(),
         //     it
         // );
+        unsafe { it.invalidate() }
         self.dropq.borrow_mut().push(DropLater::new(it));
         *self
             .dropq_info
@@ -205,7 +206,7 @@ impl LocalFreeListPool
         //     type_name::<T>(),
         //     it
         // );
-        it.invalidate_weaks();
+        it.invalidate();
         self.free_now_unchecked(it);
         // dbg_return!();
     }
@@ -361,7 +362,7 @@ pub(crate) fn try_free_and_take<T>(it: InUsePtr<T>) -> Option<T>
 pub(crate) unsafe fn free_and_take_unchecked<T: 'static>(it: InUsePtr<T>) -> T
 {
     // dbg_call!("free_and_take_unchecked<{}>({:?})", type_name::<T>(), it);
-    it.invalidate_weaks();
+    it.invalidate();
     let (res, it) = it.upcast_take();
     if let Some(it) = it {
         LOCAL_POOL.with(|x| x.free_directly(GenerationLayout::of::<T>(), it));
@@ -398,7 +399,7 @@ impl DropLater
 {
     fn new<T>(iup: InUsePtr<T>) -> Self
     {
-        iup.invalidate_weaks();
+        unsafe { iup.invalidate() }
         DropLater {
             ptr: iup.0.cast(),
             dropfn: DropLater::drop_function::<T>,
@@ -414,7 +415,7 @@ impl DropLater
         //     type_name::<T>(),
         //     ptr
         // );
-        if let Some(it) = InUsePtr::<T>(ptr.cast()).upcast() {
+        if let Some(it) = InUsePtr::<T>(ptr.cast()).upcast_unchecked() {
             flp.free_list_of::<T>().push(it)
         }
         // dbg_return!();
