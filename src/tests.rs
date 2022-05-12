@@ -69,7 +69,7 @@ fn stress_test()
 }
 
 #[test]
-fn stress_test2()
+fn stress_test_2()
 {
     let n = 10;
     for _ in 0..n {
@@ -89,4 +89,56 @@ fn stress_test2()
         thread_local_stats().free_objects(),
         (n * n + n + 1) as usize
     );
+}
+
+#[test]
+fn guards_delay_drop()
+{
+    struct DropIncrementer(&'static Cell<i32>);
+    impl Drop for DropIncrementer
+    {
+        fn drop(&mut self) { self.0.set(self.0.get() + 1); }
+    }
+
+    let cell: &'static Cell<i32> = Box::leak(Box::new(Cell::new(0)));
+
+    let thing = Owned::new(DropIncrementer(cell));
+
+    assert_eq!(cell.get(), 0);
+
+    std::mem::drop(thing);
+
+    assert_eq!(cell.get(), 1);
+
+    let thing = Owned::new(DropIncrementer(cell));
+
+    let ref_of = thing.alias();
+
+    assert_eq!(cell.get(), 1);
+
+    std::mem::drop(thing);
+
+    assert_eq!(cell.get(), 2);
+
+    std::mem::drop(ref_of);
+
+    let thing = Owned::new(DropIncrementer(cell));
+
+    let ref_of = thing.alias();
+
+    let guard = ref_of.try_ref().unwrap();
+
+    assert_eq!(cell.get(), 2);
+
+    std::mem::drop(thing);
+
+    assert_eq!(cell.get(), 2);
+
+    assert_eq!(thread_local_stats().guards, 1);
+
+    std::mem::drop(guard);
+
+    assert_eq!(thread_local_stats().guards, 0);
+
+    assert_eq!(cell.get(), 3);
 }
