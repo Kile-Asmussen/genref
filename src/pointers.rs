@@ -328,32 +328,6 @@ pub enum GenEnum<T: 'static>
 
 impl<T: 'static> GenEnum<T>
 {
-    /// Converts into `GenRef` for compact storage.
-    pub fn into_ref(self) -> GenRef<T>
-    {
-        let ptr_or_gen: PtrOrGen<T>;
-        let ptr: Option<InUsePtr<T>>;
-        match self {
-            GenEnum::Weak(w) => {
-                ptr_or_gen = PtrOrGen { gen: Some(w.gen) };
-                ptr = Some(w.ptr);
-            }
-            GenEnum::Owned(o) => {
-                ptr_or_gen = PtrOrGen { ptr: Some(o.ptr) };
-                ptr = Some(o.ptr);
-            }
-            GenEnum::Uniq(u) => {
-                ptr_or_gen = PtrOrGen { ptr: Some(u.ptr) };
-                ptr = None;
-            }
-            GenEnum::Nil => {
-                ptr_or_gen = PtrOrGen { gen: None };
-                ptr = None;
-            }
-        }
-        GenRef { ptr_or_gen, ptr }
-    }
-
     /// Attempt to dereference.
     ///
     /// Returns `Err(None)` both for `Nil` and invalid weak references.
@@ -419,37 +393,6 @@ pub struct GenRef<T: 'static>
     ptr: Option<InUsePtr<T>>,
 }
 
-impl<T: 'static> GenRef<T>
-{
-    /// Converts into `GenEnum` to perform operations on the contained
-    /// reference.
-    pub fn into_enum(self) -> GenEnum<T>
-    {
-        unsafe {
-            let res = match self {
-                GenRef {
-                    ptr_or_gen: PtrOrGen { ptr: None },
-                    ptr: None,
-                } => GenEnum::Nil,
-                GenRef {
-                    ptr_or_gen: PtrOrGen { gen: None },
-                    ptr: Some(ptr),
-                } => GenEnum::Owned(Owned { ptr }),
-                GenRef {
-                    ptr_or_gen: PtrOrGen { ptr: Some(ptr) },
-                    ptr: None,
-                } => GenEnum::Uniq(Uniq { ptr }),
-                GenRef {
-                    ptr_or_gen: PtrOrGen { gen: Some(gen) },
-                    ptr: Some(ptr),
-                } => GenEnum::Weak(Weak { gen, ptr }),
-            };
-            std::mem::forget(self);
-            res
-        }
-    }
-}
-
 impl<T: 'static> Drop for GenRef<T>
 {
     fn drop(&mut self)
@@ -502,5 +445,71 @@ impl<T: 'static> Debug for PtrOrGen<T>
                 }),
             )
             .finish()
+    }
+}
+
+impl<T: 'static> GenEnum<T>
+{
+    /// Converts into `GenRef` for compact storage.
+    pub fn into_ref(self) -> GenRef<T>
+    {
+        let ptr_or_gen: PtrOrGen<T>;
+        let ptr: Option<InUsePtr<T>>;
+        match self {
+            GenEnum::Weak(w) => {
+                ptr_or_gen = PtrOrGen { gen: Some(w.gen) };
+                ptr = Some(w.ptr);
+            }
+
+            GenEnum::Owned(o) => {
+                ptr_or_gen = PtrOrGen { gen: None };
+                ptr = Some(o.ptr);
+            }
+
+            GenEnum::Uniq(u) => {
+                ptr_or_gen = PtrOrGen { ptr: Some(u.ptr) };
+                ptr = None;
+            }
+
+            GenEnum::Nil => {
+                ptr_or_gen = PtrOrGen { gen: None };
+                ptr = None;
+            }
+        }
+        GenRef { ptr_or_gen, ptr }
+    }
+}
+
+impl<T: 'static> GenRef<T>
+{
+    /// Converts into `GenEnum` to perform operations on the contained
+    /// reference.
+    pub fn into_enum(self) -> GenEnum<T>
+    {
+        unsafe {
+            let res = match self {
+                GenRef {
+                    ptr_or_gen: PtrOrGen { gen: Some(gen) },
+                    ptr: Some(ptr),
+                } => GenEnum::Weak(Weak { gen, ptr }),
+
+                GenRef {
+                    ptr_or_gen: PtrOrGen { gen: None },
+                    ptr: Some(ptr),
+                } => GenEnum::Owned(Owned { ptr }),
+
+                GenRef {
+                    ptr_or_gen: PtrOrGen { ptr: Some(ptr) },
+                    ptr: None,
+                } => GenEnum::Uniq(Uniq { ptr }),
+
+                GenRef {
+                    ptr_or_gen: PtrOrGen { ptr: None },
+                    ptr: None,
+                } => GenEnum::Nil,
+            };
+            std::mem::forget(self);
+            res
+        }
     }
 }
