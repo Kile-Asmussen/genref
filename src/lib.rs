@@ -45,7 +45,7 @@
 //!   objects.
 
 #[macro_use]
-#[allow(unused_macros)]
+#[allow(unused_macros, dead_code)]
 pub(crate) mod debug;
 pub(crate) mod allocator;
 pub(crate) mod generations;
