@@ -250,7 +250,7 @@ pub struct Stats
     /// active `Guard`s.
     pub drop_queue_info: HashMap<GenerationLayout, usize>,
 
-    /// Number of active `Guard`s.
+    /// Number of active `Guard`s in this thread.
     pub guards: usize,
 }
 

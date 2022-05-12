@@ -33,9 +33,7 @@ pub struct Owned<T: 'static>
 #[allow(dead_code)]
 impl<T: 'static> Owned<T>
 {
-    /// Allocate an object on the managed heap. Attempts to claim
-    /// a free object of appropriate layout from the heap, allocates new
-    /// if there is none available.
+    /// A delegate of `Uniq::new` provided for convenience.
     pub fn new(it: T) -> Self
     {
         //dbg_call!("Owned::<{}>::new()", type_name::<T>());
@@ -73,7 +71,7 @@ impl<T: 'static> Owned<T>
     /// Fails if there are live `Guard`s.
     ///
     /// Also avalable as `TryFrom<Owned<T>>` on `Uniq`.
-    pub fn refine(self) -> Result<Uniq<T>, Self>
+    pub fn promote(self) -> Result<Uniq<T>, Self>
     {
         if guards_exist() {
             Err(self)
@@ -132,7 +130,9 @@ unsafe impl<T: 'static> Send for Uniq<T> {}
 #[allow(dead_code)]
 impl<T: 'static> Uniq<T>
 {
-    /// Allocate a new object on the managed heap. A wrapper for `Object::new`.
+    /// Allocate an object on the managed heap. Attempts to claim
+    /// a free object of appropriate layout from the heap, allocates new
+    /// if there is none available.
     pub fn new(it: T) -> Self
     {
         //dbg_call!("Uniq::<{}>::new(_)", type_name::<T>());
@@ -174,7 +174,7 @@ impl<T: 'static> TryFrom<Owned<T>> for Uniq<T>
 {
     type Error = Owned<T>;
 
-    fn try_from(value: Owned<T>) -> Result<Self, Self::Error> { value.refine() }
+    fn try_from(value: Owned<T>) -> Result<Self, Self::Error> { value.promote() }
 }
 
 impl<T: 'static> Deref for Uniq<T>
