@@ -2,6 +2,7 @@ use std::assert_matches::assert_matches;
 use std::cell::Cell;
 use std::mem::size_of;
 use std::ops::Add;
+use std::ops::Not;
 
 use crate::allocator::*;
 use crate::generations::*;
@@ -149,12 +150,6 @@ fn guards_delay_drop()
 }
 
 #[test]
-fn genref_is_compact()
-{
-    assert_eq!(size_of::<GenRef<i32>>(), size_of::<Weak<i32>>());
-}
-
-#[test]
 fn address_persistene()
 {
     let u = Uniq::new(1);
@@ -203,4 +198,26 @@ fn genref_genenum_roundtrip()
     let w = o.alias();
     let wa = w.addr().get();
     assert_eq!(GenRef::from(w).into_enum().addr(), wa);
+}
+
+#[cfg(test)]
+mod weak_is_copy
+{
+    use crate::pointers::*;
+    struct NotCopy;
+
+    #[derive(Clone, Copy)]
+    struct IsCopy(Weak<NotCopy>);
+}
+
+#[cfg(test)]
+mod genref_is_small
+{
+    use crate::pointers::*;
+    use std::mem::*;
+    const _: () = {
+        if size_of::<GenRef<i32>>() != size_of::<Weak<i32>>() {
+            panic!("GenRef is not small")
+        }
+    };
 }

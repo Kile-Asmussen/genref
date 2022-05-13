@@ -224,12 +224,23 @@ impl<T: 'static> fmt::Debug for Uniq<T>
 ///
 /// Compared to `Rc`, this type is `Copy`, under the assumption that references
 /// are copied more often than they are dereferenced.
-#[derive(Clone, Copy)]
 pub struct Weak<T: 'static>
 {
     ptr: InUsePtr<T>,
     gen: NonZeroUsize,
 }
+
+impl<T: 'static> Clone for Weak<T>
+{
+    fn clone(&self) -> Self
+    {
+        Self {
+            ptr: self.ptr,
+            gen: self.gen,
+        }
+    }
+}
+impl<T: 'static> Copy for Weak<T> {}
 
 #[allow(dead_code)]
 impl<T: 'static> Weak<T>
@@ -278,6 +289,7 @@ pub struct Guard<'a, T: 'static>
 
 impl<'a, T: 'static> Guard<'a, T>
 {
+    #[allow(dead_code)]
     pub(crate) fn addr(&self) -> NonZeroUsize { self.ptr.addr() }
 }
 
@@ -326,6 +338,7 @@ pub enum GenEnum<T: 'static>
     Nil,
 }
 
+#[allow(dead_code)]
 impl<T: 'static> GenEnum<T>
 {
     /// Attempt to dereference.
