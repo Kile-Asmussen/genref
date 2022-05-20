@@ -45,6 +45,7 @@
 //!   objects.
 
 #![feature(assert_matches)]
+#![feature(no_coverage)]
 
 #[macro_use]
 #[allow(unused_macros, dead_code)]
@@ -53,17 +54,20 @@ pub(crate) mod allocator;
 pub(crate) mod axioms;
 pub(crate) mod generations;
 pub(crate) mod pointers;
+pub(crate) mod stats;
 
 #[cfg(test)]
 #[allow(unused_imports)]
 mod tests;
 
 #[allow(unused_imports)]
-pub use allocator::{global_stats, reset_request_behavior, thread_local_stats, Stats};
+pub use allocator::{global_stats, reset_request_behavior, thread_local_stats};
 #[allow(unused_imports)]
 pub use generations::GenerationLayout;
 #[allow(unused_imports)]
-pub use pointers::{Owned, Uniq, Weak};
+pub use pointers::{GenEnum, GenRef, Owned, Uniq, Weak};
+#[allow(unused_imports)]
+pub use stats::Stats;
 
 #[allow(unused_imports)]
 pub use axioms::Axioms;

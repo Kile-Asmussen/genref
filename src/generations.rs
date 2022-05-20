@@ -89,27 +89,28 @@ impl<T: 'static> InUsePtr<T>
         //,type_name::<T>() )
     }
 
-    pub(crate) unsafe fn upcast(mut self) -> Option<FreePtr>
+    pub(crate) unsafe fn upcast_drop(mut self) -> Option<FreePtr>
     {
-        let res = if self.invalidatable_at_least_once_more() {
-            Some(FreePtr(self.0.cast()))
-        } else {
-            None
-        };
+        let res = self.upcast();
         self.invalidate();
         self.0.as_mut().drop_data();
         res
     }
 
-    pub(crate) unsafe fn upcast_unchecked(mut self) -> Option<FreePtr>
+    pub(crate) unsafe fn upcast_drop_invalidated(mut self) -> Option<FreePtr>
     {
-        let res = if self.invalidatable_at_least_once_more() {
+        let res = self.upcast();
+        self.0.as_mut().drop_data();
+        res
+    }
+
+    unsafe fn upcast(self) -> Option<FreePtr>
+    {
+        if self.invalidatable_at_least_once_more() {
             Some(FreePtr(self.0.cast()))
         } else {
             None
-        };
-        self.0.as_mut().drop_data();
-        res
+        }
     }
 
     pub(crate) fn invalidatable_at_least_once_more(&self) -> bool

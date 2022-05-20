@@ -6,6 +6,7 @@
 ///
 /// Many of the axioms are presented in pairs where the postconditions of one
 /// is the preconditions of the other and vice versa. Some are unpaired.
+#[no_coverage]
 #[allow(dead_code)]
 #[must_use]
 pub struct Axioms
@@ -23,6 +24,7 @@ pub struct Axioms
     pub invalid_weak: usize,
 }
 
+#[no_coverage]
 #[allow(dead_code)]
 impl Axioms
 {

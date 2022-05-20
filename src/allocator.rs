@@ -2,9 +2,10 @@ use super::generations::{FreePtr, Generation, GenerationLayout, InUsePtr};
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
 // use std::any::type_name;
+use crate::stats::*;
 use std::cell::{Cell, RefCell};
 use std::mem;
-use std::{alloc::Layout, collections::HashMap, num::NonZeroUsize, ptr::NonNull};
+use std::{collections::HashMap, num::NonZeroUsize, ptr::NonNull};
 
 struct FreeListPool(HashMap<GenerationLayout, Vec<FreePtr>>);
 
@@ -207,18 +208,18 @@ impl LocalFreeListPool
         //     it
         // );
         it.invalidate();
-        self.free_now_unchecked(it);
+        self.free_now_unique(it);
         // dbg_return!();
     }
 
-    unsafe fn free_now_unchecked<T: 'static>(&self, it: InUsePtr<T>)
+    unsafe fn free_now_unique<T: 'static>(&self, it: InUsePtr<T>)
     {
         // dbg_call!(
         //     "LocalFreeListPool.free_now_unchecked::<{}>({:?})",
         //     type_name::<T>(),
         //     it
         // );
-        if let Some(it) = it.upcast() {
+        if let Some(it) = it.upcast_drop() {
             self.free_directly(GenerationLayout::of::<T>(), it)
         }
         // dbg_return!();
@@ -240,21 +241,6 @@ impl LocalFreeListPool
     }
 }
 
-/// Heap memory usage statistics, for diagnosing memory leaks and the like.
-#[derive(Default)]
-pub struct Stats
-{
-    /// Available freed allocations by layout.
-    pub by_layout: HashMap<GenerationLayout, usize>,
-
-    /// Allocations needing to be fried, prevented the presence of one or more
-    /// active `Guard`s.
-    pub drop_queue_info: HashMap<GenerationLayout, usize>,
-
-    /// Number of active `Guard`s in this thread.
-    pub guards: usize,
-}
-
 /// Reset allocation behavior to request items from the global pool.
 #[allow(dead_code)]
 pub fn reset_request_behavior() { LOCAL_POOL.with(|x| x.reset_requests()) }
@@ -271,39 +257,6 @@ pub fn thread_local_stats() -> Stats { LOCAL_POOL.with(|x| x.get_stats()) }
 pub fn global_stats() -> Stats { GLOBAL_POOL.lock().get_stats() }
 
 /// Collection of heap memory usage statistics.
-#[allow(dead_code)]
-impl Stats
-{
-    fn sum_sizes(map: &HashMap<GenerationLayout, usize>) -> usize
-    {
-        let mut res = 0;
-        for (layout, amount) in map {
-            res += Layout::from(*layout).size() * amount;
-        }
-        res
-    }
-
-    /// Number of freed allocations in this heap.
-    pub fn free_objects(&self) -> usize { self.by_layout.values().sum() }
-
-    /// Memory size of freed allocations in this heap.
-    pub fn free_heap_size(&self) -> usize { Self::sum_sizes(&self.by_layout) }
-
-    /// Number of allocations waiting to be freed.
-    pub fn bound_objects(&self) -> usize { self.drop_queue_info.values().sum() }
-
-    /// Memory size of allocations waiting to be freed.
-    pub fn bound_heap_size(&self) -> usize { Self::sum_sizes(&self.drop_queue_info) }
-
-    /// Approximate memory size of overhead objects: free lists and drop queue.
-    ///
-    /// Size of the internal hash tables is assumed to be negligible.
-    pub fn overhead_size(&self) -> usize
-    {
-        self.drop_queue_info.values().sum::<usize>() * Layout::new::<DropLater>().size()
-            + self.by_layout.values().sum::<usize>() * Layout::new::<FreePtr>().size()
-    }
-}
 
 pub(crate) fn guard_now_in_use()
 {
@@ -330,10 +283,10 @@ pub(crate) unsafe fn free<T>(it: InUsePtr<T>)
     LOCAL_POOL.with(|x| x.reclaim(it));
     // dbg_return!();
 }
-pub(crate) unsafe fn free_unchecked<T>(it: InUsePtr<T>)
+pub(crate) unsafe fn free_unique<T>(it: InUsePtr<T>)
 {
     // dbg_call!("free_unchecked<{}>({:?})", type_name::<T>(), it);
-    LOCAL_POOL.with(|x| x.free_now_unchecked(it));
+    LOCAL_POOL.with(|x| x.free_now_unique(it));
     // dbg_return!();
 }
 pub(crate) fn allocate<T: 'static>() -> Option<FreePtr>
@@ -343,7 +296,7 @@ pub(crate) fn allocate<T: 'static>() -> Option<FreePtr>
     LOCAL_POOL.with(|x| x.reallocate::<T>())
     // )
 }
-pub(crate) fn try_free_and_take<T>(it: InUsePtr<T>) -> Option<T>
+pub(crate) fn free_and_take<T>(it: InUsePtr<T>) -> Option<T>
 {
     // dbg_call!("try_free_and_take<{}>({:?})", type_name::<T>(), it);
     let res = if guards_exist() {
@@ -375,12 +328,7 @@ impl Drop for LocalFreeListPool
 {
     fn drop(&mut self)
     {
-        if !self.is_safe() {
-            panic!(
-                "{} guards persisting past local free list pool",
-                self.guards.get()
-            );
-        }
+        self.guards.set(0);
         self.purge_drop_queue();
         let mut global_pool = GLOBAL_POOL.lock();
         for (layout, mut free_list) in self.pool.borrow_mut().0.drain() {
@@ -389,7 +337,7 @@ impl Drop for LocalFreeListPool
     }
 }
 
-struct DropLater
+pub(crate) struct DropLater
 {
     ptr: NonNull<Generation<()>>,
     dropfn: unsafe fn(NonNull<Generation<()>>, &mut FreeListPool),
@@ -415,7 +363,7 @@ impl DropLater
         //     type_name::<T>(),
         //     ptr
         // );
-        if let Some(it) = InUsePtr::<T>(ptr.cast()).upcast_unchecked() {
+        if let Some(it) = InUsePtr::<T>(ptr.cast()).upcast_drop_invalidated() {
             flp.free_list_of::<T>().push(it)
         }
         // dbg_return!();

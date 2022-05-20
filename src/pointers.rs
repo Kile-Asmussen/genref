@@ -1,8 +1,8 @@
-use crate::allocator::{free_and_take_unchecked, free_unchecked};
+use crate::allocator::{free_and_take_unchecked, free_unique};
 
 use super::{
     allocator::{
-        allocate, free, guard_no_longer_in_use, guard_now_in_use, guards_exist, try_free_and_take,
+        allocate, free, free_and_take, guard_no_longer_in_use, guard_now_in_use, guards_exist,
     },
     generations::InUsePtr,
 };
@@ -57,7 +57,7 @@ impl<T: 'static> Owned<T>
     /// Fails if there are live `Guard`s.
     pub fn try_into_inner(self) -> Result<T, Self>
     {
-        if let Some(it) = try_free_and_take(self.ptr) {
+        if let Some(it) = free_and_take(self.ptr) {
             std::mem::forget(self);
             Ok(it)
         } else {
@@ -87,6 +87,7 @@ impl<T: 'static> Owned<T>
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn addr(&self) -> NonZeroUsize { self.ptr.addr() }
 }
 
@@ -175,6 +176,7 @@ impl<T: 'static> Uniq<T>
         unsafe { free_and_take_unchecked(ptr) }
     }
 
+    #[cfg(test)]
     pub(crate) fn addr(&self) -> NonZeroUsize { self.ptr.addr() }
 }
 
@@ -202,7 +204,7 @@ impl<T: 'static> Drop for Uniq<T>
     fn drop(&mut self)
     {
         //dbg_call!("Uniq::<{}>.drop()", type_name::<T>());
-        unsafe { free_unchecked(self.ptr) }
+        unsafe { free_unique(self.ptr) }
         //dbg_return!();
     }
 }
@@ -262,6 +264,7 @@ impl<T: 'static> Weak<T>
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn addr(&self) -> NonZeroUsize { self.ptr.addr() }
 }
 
@@ -289,7 +292,7 @@ pub struct Guard<'a, T: 'static>
 
 impl<'a, T: 'static> Guard<'a, T>
 {
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn addr(&self) -> NonZeroUsize { self.ptr.addr() }
 }
 
@@ -374,6 +377,7 @@ impl<T: 'static> GenEnum<T>
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn addr(&self) -> usize
     {
         match self {

@@ -33,25 +33,13 @@ fn user_story()
 
     assert_eq!(q.try_deref().map(|z| z.get()), Some(3));
 
-    let x = match x.try_into_inner() {
-        Ok(_) => {
-            assert!(false, "impossible");
-            return;
-        }
-        Err(x) => x,
-    };
+    let x = x.try_into_inner().expect_err("impossible");
 
     std::mem::drop(z);
 
     assert_eq!(thread_local_stats().guards, 0);
 
-    let _ = match x.try_into_inner() {
-        Ok(i) => i,
-        Err(_) => {
-            assert!(false, "impossible");
-            return;
-        }
-    };
+    x.try_into_inner().expect("impossible");
 
     assert!(y.try_deref().is_none());
 
