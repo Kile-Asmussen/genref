@@ -1,6 +1,5 @@
 use std::{
     cell::{Cell, RefCell},
-    io::Read,
     mem,
 };
 
@@ -35,8 +34,11 @@ thread_local! {
 }
 
 struct Lock(Cell<isize>);
-struct Reading;
-struct Writing;
+pub struct Reading;
+pub fn reading() -> Option<Reading> { Lock::reading() }
+pub struct Writing;
+pub fn writing() -> Option<Writing> { Lock::writing() }
+
 impl Lock
 {
     fn new() -> Self { Self(Cell::new(0)) }
@@ -63,6 +65,7 @@ impl Lock
     fn writable() -> bool { LOCK.with(|l| l.0.get() == 0) }
     unsafe fn write() { LOCK.with(|l| l.0.set(-1)) }
     unsafe fn unwrite() { LOCK.with(|l| l.0.set(0)) }
+
     fn readable() -> bool { LOCK.with(|l| l.0.get() >= 0) }
     unsafe fn read() { LOCK.with(|l| l.0.set(l.0.get() + 1)) }
     unsafe fn unread() { LOCK.with(|l| l.0.set(l.0.get() - 1)) }
@@ -157,21 +160,21 @@ impl DropQueue
 
 use std::{mem::ManuallyDrop, ptr::NonNull};
 
-struct Owned<T: 'static>
+pub struct Strong<T: 'static>
 {
     gen: Generation,
     ptr: ManuallyDrop<Box<T>>,
 }
 
 #[derive(Copy, Clone)]
-struct Weak<T: 'static>
+pub struct Weak<T: 'static>
 {
     genref: u32,
     gen: Generation,
     ptr: NonNull<T>,
 }
 
-impl<T: 'static> Drop for Owned<T>
+impl<T: 'static> Drop for Strong<T>
 {
     fn drop(&mut self)
     {
@@ -189,9 +192,9 @@ impl<T: 'static> Drop for Owned<T>
     }
 }
 
-impl<T: 'static> Owned<T>
+impl<T: 'static> Strong<T>
 {
-    fn new(b: Box<T>) -> Self
+    pub fn new(b: Box<T>) -> Self
     {
         Self {
             ptr: ManuallyDrop::new(b),
@@ -199,7 +202,7 @@ impl<T: 'static> Owned<T>
         }
     }
 
-    fn alias(&self) -> Weak<T>
+    pub fn alias(&self) -> Weak<T>
     {
         Weak {
             genref: self.gen.get(),
@@ -208,7 +211,7 @@ impl<T: 'static> Owned<T>
         }
     }
 
-    fn take(mut self, wl: &Writing) -> Box<T>
+    pub fn take(mut self, wl: &Writing) -> Box<T>
     {
         Generation::free(self.gen);
         let b = unsafe { ManuallyDrop::take(&mut self.ptr) };
@@ -216,13 +219,13 @@ impl<T: 'static> Owned<T>
         b
     }
 
-    fn as_ref(&self, rl: &Reading) -> &T { &self.ptr }
-    fn as_mut(&mut self, wl: &Writing) -> &mut T { &mut self.ptr }
+    pub fn as_ref(&self, rl: &Reading) -> &T { &self.ptr }
+    pub fn as_mut(&mut self, wl: &Writing) -> &mut T { &mut self.ptr }
 }
 
 impl<T: 'static> Weak<T>
 {
-    fn as_ref(&self, rl: &Reading) -> Option<&T>
+    pub fn as_ref(&self, rl: &Reading) -> Option<&T>
     {
         if self.gen.get() == self.genref {
             Some(unsafe { self.ptr.as_ref() })
@@ -230,7 +233,8 @@ impl<T: 'static> Weak<T>
             None
         }
     }
-    fn as_mut(&mut self, wl: &Writing) -> Option<&mut T>
+
+    pub fn as_mut(&mut self, wl: &Writing) -> Option<&mut T>
     {
         if self.gen.get() == self.genref {
             Some(unsafe { self.ptr.as_mut() })
