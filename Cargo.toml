@@ -4,7 +4,7 @@ description = "Vale's generational references in Rust"
 readme = "README.md"
 repository = "https://github.com/Kile-Asmussen/genref"
 license = "MIT"
-version = "0.8.0"
+version = "0.8.1"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
