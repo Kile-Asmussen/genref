@@ -178,7 +178,6 @@ pub struct Strong<T: 'static>
     ptr: ManuallyDrop<Box<T>>,
 }
 
-#[derive(Copy, Clone)]
 pub struct Weak<T: 'static>
 {
     genref: u32,
@@ -249,6 +248,49 @@ impl<T: 'static> Weak<T>
             Some(unsafe { self.ptr.as_mut() })
         } else {
             None
+        }
+    }
+}
+
+impl<T: 'static> Clone for Weak<T>
+{
+    fn clone(&self) -> Self { *self }
+}
+
+impl<T: 'static> Copy for Weak<T> {}
+
+pub enum Ref<T: 'static>
+{
+    Strong(Strong<T>),
+    Weak(Weak<T>),
+}
+
+impl<T: 'static> Ref<T>
+{
+    pub fn as_ref(&self, rl: &Reading) -> Option<&T>
+    {
+        match self {
+            Ref::Strong(s) => Some(s.as_ref(rl)),
+            Ref::Weak(w) => w.as_ref(rl),
+        }
+    }
+
+    pub fn as_mut(&mut self, wl: &mut Writing) -> Option<&mut T>
+    {
+        match self {
+            Ref::Strong(s) => Some(s.as_mut(wl)),
+            Ref::Weak(w) => w.as_mut(wl),
+        }
+    }
+}
+
+impl<T: 'static> Clone for Ref<T>
+{
+    fn clone(&self) -> Self
+    {
+        match self {
+            Self::Strong(s) => Self::Weak(s.alias()),
+            Self::Weak(w) => Self::Weak(*w),
         }
     }
 }
