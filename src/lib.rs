@@ -1,7 +1,5 @@
 #![feature(assert_matches)]
 
-//! # Gen
-
 #[cfg(test)]
 mod tests;
 
