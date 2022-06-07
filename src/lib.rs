@@ -245,6 +245,9 @@ impl<T: 'static> Strong<T>
 {
     pub fn new(t: T) -> Self { Self::from(Box::new(t)) }
 
+    /// Generate a weak alias
+    ///
+    /// Reads the current generation to use as future reference
     pub fn alias(&self) -> Weak<T>
     {
         Weak {
@@ -254,6 +257,10 @@ impl<T: 'static> Strong<T>
         }
     }
 
+    /// Extract underlying box
+    ///
+    /// This can potentially be used to deallocate the box, so
+    /// it requires writing privileges
     pub fn take(mut self, _wl: &mut Writing) -> Box<T>
     {
         Generation::free(self.gen);
@@ -262,9 +269,19 @@ impl<T: 'static> Strong<T>
         b
     }
 
+    /// Obtain reading permissions
+    ///
+    /// Read lock is necessary as otherwise a mutable alias could
+    /// be created using a `Weak`.
     pub fn as_ref(&self, _rl: &Reading) -> &T { &self.ptr }
+
+    /// Obtain writing permissions
     pub fn as_mut(&mut self, _wl: &mut Writing) -> &mut T { &mut self.ptr }
 
+    /// Reference contained type
+    ///
+    /// Creates a weak reference to a contained field or other
+    /// derived quantity.
     pub fn map<F, U>(&self, rl: &Reading, f: F) -> Weak<U>
     where
         for<'a> F: Fn(&'a T) -> &'a U,
@@ -290,6 +307,7 @@ impl<T: 'static> From<Box<T>> for Strong<T>
 
 impl<T: 'static> Weak<T>
 {
+    /// Creates an invalid reference.
     pub fn dangling() -> Self
     {
         static mut ZERO: Cell<u32> = Cell::new(0);
@@ -300,8 +318,13 @@ impl<T: 'static> Weak<T>
         }
     }
 
+    /// Check if this reference is currently valid
     pub fn is_valid(&self) -> bool { self.genref == self.gen.get() }
 
+    /// Attempt to dereference
+    ///
+    /// Returns `None` if the reference is invalid, otherwise
+    /// functions as `Strong::as_ref`
     pub fn try_ref(&self, _rl: &Reading) -> Option<&T>
     {
         if self.is_valid() {
@@ -311,6 +334,10 @@ impl<T: 'static> Weak<T>
         }
     }
 
+    /// Attempt to mutate
+    ///
+    /// Returns `None` if the reference is invalid, otherwise
+    /// functions as `Strong::as_mut`
     pub fn try_mut(&mut self, _wl: &mut Writing) -> Option<&mut T>
     {
         if self.is_valid() {
@@ -320,6 +347,10 @@ impl<T: 'static> Weak<T>
         }
     }
 
+    /// Attempt to access subfield
+    ///
+    /// Returns `None` if the reference is invalid, otherwise functions
+    /// as `Strong::map`.
     pub fn try_map<F, U>(&self, rl: &Reading, f: F) -> Option<Weak<U>>
     where
         for<'a> F: Fn(&'a T) -> &'a U,
@@ -343,6 +374,9 @@ impl<T: 'static> Clone for Weak<T>
 
 impl<T: 'static> Copy for Weak<T> {}
 
+/// Combined reference type
+///
+/// Contains either a strong or a weak reference
 pub enum Ref<T: 'static>
 {
     Strong(Strong<T>),
@@ -354,7 +388,7 @@ impl<T: 'static> Ref<T>
     /// New strong reference
     pub fn new(t: T) -> Self { Self::Strong(Strong::new(t)) }
 
-    pub fn try_as_ref(&self, rl: &Reading) -> Option<&T>
+    pub fn try_ref(&self, rl: &Reading) -> Option<&T>
     {
         match self {
             Ref::Strong(s) => Some(s.as_ref(rl)),
@@ -407,6 +441,7 @@ impl<T: 'static> Ref<T>
 
 impl<T: 'static> Clone for Ref<T>
 {
+    /// Always returns `Weak`
     fn clone(&self) -> Self
     {
         match self {

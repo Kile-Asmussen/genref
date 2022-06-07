@@ -42,21 +42,12 @@ lazy_static! {
 
 struct Lock(parking_lot::RawRwLock);
 
-/// Non-exclusive lock (ZST)
-///
-/// Used to create shared references to underlying objects,
-/// its existence defers dropping of allocated objects.
 #[derive(Debug)]
 pub struct Reading(());
 pub fn reading() -> Reading { Lock::reading() }
 pub fn try_reading() -> Option<Reading> { Lock::try_reading() }
 
-/// Exclusive lock (ZST)
-///
-/// Used to create mutable references to underlying objects,
-/// its existence defers dropping of allocated objects.
-///
-/// USAGE IS HIGHLY ILL ADVISED
+/// Note: using this is ill-adviced, use `Arc` instead.
 #[derive(Debug)]
 pub struct Writing(());
 pub fn writing() -> Writing { Lock::writing() }
@@ -212,22 +203,12 @@ impl DropQueue
 
 use std::{mem::ManuallyDrop, ptr::NonNull};
 
-/// Strong reference
-///
-/// Owns its underlying allocation.
-///
-/// The generation counter is allocated separately, since it must persist for
-/// the entire lifetime of all `Weak` references.
 pub struct Strong<T: Sync + Send + 'static>
 {
     gen: Generation,
     ptr: ManuallyDrop<Box<T>>,
 }
 
-/// Weak reference
-///
-/// Stores its reference generation locally and cross-checks it everytime an
-/// access is made.
 pub struct Weak<T: Sync + Send + 'static>
 {
     genref: u32,
