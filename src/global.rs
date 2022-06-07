@@ -9,12 +9,7 @@ use std::{
     sync::atomic::{AtomicU32, Ordering},
 };
 
-#[cfg(not(feature = "parking_lot"))]
-use std::sync::{Mutex, RwLock};
-
-#[cfg(feature = "parking_lot")]
 use lock_api::{RawRwLock, RawRwLockRecursive, RawRwLockUpgrade};
-#[cfg(feature = "parking_lot")]
 use parking_lot::Mutex;
 
 use lazy_static::lazy_static;
@@ -30,7 +25,7 @@ impl Generation
 
     fn free(this: Self)
     {
-        let c = unsafe { this.0.fetch_add(1, Ordering::Relaxed) };
+        let c = this.0.fetch_add(1, Ordering::Relaxed);
 
         if c != u32::MAX {
             FreeList::free(this);
@@ -54,14 +49,18 @@ struct Lock(parking_lot::RawRwLock);
 #[derive(Debug)]
 pub struct Reading(());
 pub fn reading() -> Reading { Lock::reading() }
+pub fn try_reading() -> Option<Reading> { Lock::try_reading() }
 
 /// Exclusive lock (ZST)
 ///
 /// Used to create mutable references to underlying objects,
 /// its existence defers dropping of allocated objects.
+///
+/// USAGE IS HIGHLY ILL ADVISED
 #[derive(Debug)]
 pub struct Writing(());
 pub fn writing() -> Writing { Lock::writing() }
+pub fn try_writing() -> Option<Writing> { Lock::try_writing() }
 
 impl Lock
 {
