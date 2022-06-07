@@ -1,5 +1,23 @@
 #![feature(assert_matches)]
 
+//! # Generational counting
+//!
+//! This crate implements Vale's generational reference counting memory
+//! management. Intended as an alternative to Rc with slightly different
+//! semantics.
+//!
+//! Advantages over `Rc`:
+//! - Sharing references are `Copy` and therefore extremely cheap
+//! - RAII semantics
+//!
+//! Disadvantages:
+//! - Only one owned reference, requiring management
+//! - Dereferencing returns `Option`
+//! - Not `Deref`
+//!
+//! The locking system is non-granular for ease of implementation (and possibly
+//! speed.)
+
 #[cfg(test)]
 mod tests;
 
@@ -40,10 +58,18 @@ thread_local! {
 
 struct Lock(Cell<isize>);
 
+/// Non-exclusive lock (ZST)
+///
+/// Used to create shared references to underlying objects,
+/// its existence defers dropping of allocated objects.
 #[derive(Debug)]
 pub struct Reading;
 pub fn reading() -> Option<Reading> { Lock::reading() }
 
+/// Exclusive lock (ZST)
+///
+/// Used to create mutable references to underlying objects,
+/// its existence defers dropping of allocated objects.
 #[derive(Debug)]
 pub struct Writing;
 pub fn writing() -> Option<Writing> { Lock::writing() }
@@ -172,12 +198,22 @@ pub fn deferred() -> usize { DROPQUEUE.with(|dq| dq.borrow().0.len()) }
 
 use std::{mem::ManuallyDrop, ptr::NonNull};
 
+/// Strong reference
+///
+/// Owns its underlying allocation.
+///
+/// The generation counter is allocated separately, since it must persist for
+/// the entire lifetime of all `Weak` references.
 pub struct Strong<T: 'static>
 {
     gen: Generation,
     ptr: ManuallyDrop<Box<T>>,
 }
 
+/// Weak reference
+///
+/// Stores its reference generation locally and cross-checks it everytime an
+/// access is made.
 pub struct Weak<T: 'static>
 {
     genref: u32,
