@@ -26,6 +26,7 @@ use std::{
     mem,
 };
 
+#[repr(transparent)]
 #[derive(Clone, Copy)]
 struct Generation(NonNull<Cell<u32>>);
 
@@ -33,17 +34,16 @@ impl Generation
 {
     fn new() -> Self { FreeList::unfree().unwrap_or_else(FreshList::fresh) }
 
-    fn get(&self) -> u32 { unsafe { self.0.as_ref().get() } }
+    fn get(&self) -> u32 { unsafe { self.0.as_ref() }.get() }
 
     fn free(this: Self)
     {
-        let n = unsafe {
-            let c = this.0.as_ref();
-            c.set(c.get().wrapping_add(1));
-            c.get()
-        };
+        let c = unsafe { this.0.as_ref() };
 
-        if n != 0 {
+        if c.get() == u32::MAX {
+            c.set(0);
+        } else {
+            c.set(c.get() + 1);
             FreeList::free(this);
         }
     }
@@ -153,7 +153,8 @@ impl FreeList
 
 impl FreshList
 {
-    fn new() -> Self { Self(0, vec![Cell::new(0); 32], vec![]) }
+    const INIT: u32 = 1;
+    fn new() -> Self { Self(0, vec![Cell::new(Self::INIT); 32], vec![]) }
 
     fn fresh_(&mut self) -> Generation
     {
@@ -170,7 +171,7 @@ impl FreshList
     {
         self.2.push(mem::replace(
             &mut self.1,
-            vec![Cell::new(1); self.0 + self.0 / 2],
+            vec![Cell::new(Self::INIT); self.0 + self.0 / 2],
         ));
         self.0 = 0;
     }
@@ -185,7 +186,8 @@ impl DropQueue
 
     fn clear_(&mut self, _wl: &mut Writing) -> impl Drop
     {
-        mem::replace(&mut self.0, Vec::with_capacity(32))
+        let re = Vec::with_capacity(self.0.len());
+        mem::replace(&mut self.0, re)
     }
 
     fn clear(wl: &mut Writing) -> impl Drop { DROPQUEUE.with(|dq| dq.borrow_mut().clear_(wl)) }
@@ -245,7 +247,7 @@ impl<T: 'static> Strong<T>
         Weak {
             genref: self.gen.get(),
             gen: self.gen,
-            ptr: NonNull::from(self.ptr.as_ref()),
+            ptr: NonNull::from((*self.ptr).as_ref()),
         }
     }
 
@@ -287,14 +289,12 @@ impl<T: 'static> Weak<T>
 {
     pub fn dangling() -> Self
     {
-        let gen = Generation::new();
-        let res = Weak {
-            genref: gen.get() - 1,
-            gen: gen,
+        static mut ZERO: Cell<u32> = Cell::new(0);
+        Weak {
+            genref: u32::MAX,
+            gen: Generation(NonNull::from(unsafe { &mut ZERO })),
             ptr: NonNull::dangling(),
-        };
-        Generation::free(gen);
-        res
+        }
     }
 
     pub fn is_valid(&self) -> bool { self.genref == self.gen.get() }
@@ -373,6 +373,30 @@ impl<T: 'static> Ref<T>
             Ref::Weak(w) => w.try_map(rl, f).map(Ref::Weak),
         }
     }
+
+    pub fn is_weak(&self) -> bool
+    {
+        match self {
+            Ref::Strong(_) => false,
+            Ref::Weak(_) => true,
+        }
+    }
+
+    pub fn is_strong(&self) -> bool
+    {
+        match self {
+            Ref::Strong(_) => false,
+            Ref::Weak(_) => true,
+        }
+    }
+
+    pub fn is_valid(&self) -> bool
+    {
+        match self {
+            Ref::Strong(_) => true,
+            Ref::Weak(w) => w.is_valid(),
+        }
+    }
 }
 
 impl<T: 'static> Clone for Ref<T>
@@ -384,4 +408,14 @@ impl<T: 'static> Clone for Ref<T>
             Self::Weak(w) => Self::Weak(*w),
         }
     }
+}
+
+impl<T: 'static> From<Weak<T>> for Ref<T>
+{
+    fn from(w: Weak<T>) -> Self { Ref::Weak(w) }
+}
+
+impl<T: 'static> From<Strong<T>> for Ref<T>
+{
+    fn from(s: Strong<T>) -> Self { Ref::Strong(s) }
 }

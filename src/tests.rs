@@ -1,5 +1,5 @@
 use crate::*;
-use std::{assert_matches::assert_matches, fs::read, mem, rc::Rc};
+use std::{assert_matches::assert_matches, mem, rc::Rc};
 
 #[test]
 fn many_readers()
