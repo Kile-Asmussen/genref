@@ -62,7 +62,7 @@ fn weak_reading()
     let b = a.alias();
     let r = reading().unwrap();
 
-    assert_eq!(*b.try_as_ref(&r).unwrap(), 1);
+    assert_eq!(*b.try_ref(&r).unwrap(), 1);
 }
 
 #[test]
@@ -87,7 +87,7 @@ fn strong_writing_weak_reading()
     mem::drop(w);
 
     let r = reading().unwrap();
-    assert_eq!(*b.try_as_ref(&r).unwrap(), 2);
+    assert_eq!(*b.try_ref(&r).unwrap(), 2);
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn weak_writing_strong_reading()
     let mut b = a.alias();
 
     let mut w = writing().unwrap();
-    *b.try_as_mut(&mut w).unwrap() = 2;
+    *b.try_mut(&mut w).unwrap() = 2;
     mem::drop(w);
 
     let r = reading().unwrap();
@@ -112,11 +112,11 @@ fn weak_writing_weak_reading()
     let c = b;
 
     let mut w = writing().unwrap();
-    *b.try_as_mut(&mut w).unwrap() = 2;
+    *b.try_mut(&mut w).unwrap() = 2;
     mem::drop(w);
 
     let r = reading().unwrap();
-    assert_eq!(*c.try_as_ref(&r).unwrap(), 2);
+    assert_eq!(*c.try_ref(&r).unwrap(), 2);
 }
 
 struct DropInc(Rc<Cell<i32>>);
@@ -180,7 +180,7 @@ fn reading_invalid_weak_fails()
 
     let r = reading().unwrap();
 
-    assert_matches!(b.try_as_ref(&r), None);
+    assert_matches!(b.try_ref(&r), None);
 }
 
 #[test]
@@ -193,5 +193,5 @@ fn writing_invalid_weak_fails()
 
     let mut w = writing().unwrap();
 
-    assert_matches!(b.try_as_mut(&mut w), None);
+    assert_matches!(b.try_mut(&mut w), None);
 }
