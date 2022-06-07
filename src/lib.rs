@@ -265,11 +265,34 @@ impl<T: 'static> Strong<T>
 
     pub fn as_ref(&self, _rl: &Reading) -> &T { &self.ptr }
     pub fn as_mut(&mut self, _wl: &mut Writing) -> &mut T { &mut self.ptr }
+
+    pub fn map<F, U>(&self, rl: &Reading, f: F) -> Weak<U>
+    where
+        for<'a> F: Fn(&'a T) -> &'a U,
+    {
+        Weak {
+            genref: self.gen.get(),
+            gen: self.gen,
+            ptr: NonNull::from(f(self.as_ref(rl))),
+        }
+    }
 }
 
 impl<T: 'static> Weak<T>
 {
-    pub fn as_ref(&self, _rl: &Reading) -> Option<&T>
+    pub fn dangling() -> Self
+    {
+        let gen = Generation::new();
+        let res = Weak {
+            genref: gen.get() - 1,
+            gen: gen,
+            ptr: NonNull::dangling(),
+        };
+        Generation::free(gen);
+        res
+    }
+
+    pub fn try_as_ref(&self, _rl: &Reading) -> Option<&T>
     {
         if self.gen.get() == self.genref {
             Some(unsafe { self.ptr.as_ref() })
@@ -278,10 +301,25 @@ impl<T: 'static> Weak<T>
         }
     }
 
-    pub fn as_mut(&mut self, _wl: &mut Writing) -> Option<&mut T>
+    pub fn try_as_mut(&mut self, _wl: &mut Writing) -> Option<&mut T>
     {
         if self.gen.get() == self.genref {
             Some(unsafe { self.ptr.as_mut() })
+        } else {
+            None
+        }
+    }
+
+    pub fn try_map<F, U>(&self, rl: &Reading, f: F) -> Option<Weak<U>>
+    where
+        for<'a> F: Fn(&'a T) -> &'a U,
+    {
+        if let Some(a) = self.try_as_ref(rl) {
+            Some(Weak {
+                genref: self.genref,
+                gen: self.gen,
+                ptr: NonNull::from(f(a)),
+            })
         } else {
             None
         }
@@ -303,19 +341,29 @@ pub enum Ref<T: 'static>
 
 impl<T: 'static> Ref<T>
 {
-    pub fn as_ref(&self, rl: &Reading) -> Option<&T>
+    pub fn try_as_ref(&self, rl: &Reading) -> Option<&T>
     {
         match self {
             Ref::Strong(s) => Some(s.as_ref(rl)),
-            Ref::Weak(w) => w.as_ref(rl),
+            Ref::Weak(w) => w.try_as_ref(rl),
         }
     }
 
-    pub fn as_mut(&mut self, wl: &mut Writing) -> Option<&mut T>
+    pub fn try_as_mut(&mut self, wl: &mut Writing) -> Option<&mut T>
     {
         match self {
             Ref::Strong(s) => Some(s.as_mut(wl)),
-            Ref::Weak(w) => w.as_mut(wl),
+            Ref::Weak(w) => w.try_as_mut(wl),
+        }
+    }
+
+    pub fn try_map<F, U>(&self, rl: &Reading, f: F) -> Option<Ref<U>>
+    where
+        for<'a> F: Fn(&'a T) -> &'a U,
+    {
+        match self {
+            Ref::Strong(s) => Some(Ref::Weak(s.map(rl, f))),
+            Ref::Weak(w) => w.try_map(rl, f).map(Ref::Weak),
         }
     }
 }
