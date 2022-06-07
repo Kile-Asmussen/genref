@@ -21,6 +21,9 @@
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "global")]
+mod global;
+
 use std::{
     cell::{Cell, RefCell},
     mem,
@@ -63,7 +66,7 @@ struct Lock(Cell<isize>);
 /// Used to create shared references to underlying objects,
 /// its existence defers dropping of allocated objects.
 #[derive(Debug)]
-pub struct Reading;
+pub struct Reading(());
 pub fn reading() -> Option<Reading> { Lock::reading() }
 
 /// Exclusive lock (ZST)
@@ -71,7 +74,7 @@ pub fn reading() -> Option<Reading> { Lock::reading() }
 /// Used to create mutable references to underlying objects,
 /// its existence defers dropping of allocated objects.
 #[derive(Debug)]
-pub struct Writing;
+pub struct Writing(());
 pub fn writing() -> Option<Writing> { Lock::writing() }
 
 impl Lock
@@ -81,7 +84,7 @@ impl Lock
     {
         if Self::readable() {
             unsafe { Self::read() }
-            Some(Reading)
+            Some(Reading(()))
         } else {
             None
         }
@@ -91,7 +94,7 @@ impl Lock
     {
         if Self::writable() {
             unsafe { Self::write() }
-            Some(Writing)
+            Some(Writing(()))
         } else {
             None
         }
@@ -124,7 +127,7 @@ impl Clone for Reading
     fn clone(&self) -> Self
     {
         unsafe { Lock::read() }
-        Self
+        Self(())
     }
 }
 
@@ -132,8 +135,9 @@ impl Drop for Writing
 {
     fn drop(&mut self)
     {
-        DropQueue::clear(self);
+        let q = DropQueue::clear(self);
         unsafe { Lock::unwrite() }
+        mem::drop(q);
     }
 }
 
@@ -154,7 +158,7 @@ impl FreeList
 impl FreshList
 {
     const INIT: u32 = 1;
-    fn new() -> Self { Self(0, vec![Cell::new(Self::INIT); 32], vec![]) }
+    fn new() -> Self { Self(0, Self::more(32), vec![]) }
 
     fn fresh_(&mut self) -> Generation
     {
@@ -169,13 +173,14 @@ impl FreshList
 
     fn refresh(&mut self)
     {
-        self.2.push(mem::replace(
-            &mut self.1,
-            vec![Cell::new(Self::INIT); self.0 + self.0 / 2],
-        ));
+        self.2
+            .push(mem::replace(&mut self.1, Self::more(self.0 + self.0 / 2)));
         self.0 = 0;
     }
+
+    fn more(n: usize) -> Vec<Cell<u32>> { vec![Cell::new(Self::INIT); n] }
 }
+
 trait DropLater {}
 impl<T> DropLater for T {}
 struct DropQueue(Vec<Box<dyn DropLater>>);
@@ -195,8 +200,6 @@ impl DropQueue
     fn defer_(&mut self, val: Box<dyn DropLater>) { self.0.push(val) }
     fn defer(val: Box<dyn DropLater>) { DROPQUEUE.with(|dq| dq.borrow_mut().defer_(val)) }
 }
-
-pub fn deferred() -> usize { DROPQUEUE.with(|dq| dq.borrow().0.len()) }
 
 use std::{mem::ManuallyDrop, ptr::NonNull};
 
@@ -299,7 +302,7 @@ impl<T: 'static> Weak<T>
 
     pub fn is_valid(&self) -> bool { self.genref == self.gen.get() }
 
-    pub fn try_as_ref(&self, _rl: &Reading) -> Option<&T>
+    pub fn try_ref(&self, _rl: &Reading) -> Option<&T>
     {
         if self.is_valid() {
             Some(unsafe { self.ptr.as_ref() })
@@ -308,7 +311,7 @@ impl<T: 'static> Weak<T>
         }
     }
 
-    pub fn try_as_mut(&mut self, _wl: &mut Writing) -> Option<&mut T>
+    pub fn try_mut(&mut self, _wl: &mut Writing) -> Option<&mut T>
     {
         if self.is_valid() {
             Some(unsafe { self.ptr.as_mut() })
@@ -321,7 +324,7 @@ impl<T: 'static> Weak<T>
     where
         for<'a> F: Fn(&'a T) -> &'a U,
     {
-        if let Some(a) = self.try_as_ref(rl) {
+        if let Some(a) = self.try_ref(rl) {
             Some(Weak {
                 genref: self.genref,
                 gen: self.gen,
@@ -348,19 +351,22 @@ pub enum Ref<T: 'static>
 
 impl<T: 'static> Ref<T>
 {
+    /// New strong reference
+    pub fn new(t: T) -> Self { Self::Strong(Strong::new(t)) }
+
     pub fn try_as_ref(&self, rl: &Reading) -> Option<&T>
     {
         match self {
             Ref::Strong(s) => Some(s.as_ref(rl)),
-            Ref::Weak(w) => w.try_as_ref(rl),
+            Ref::Weak(w) => w.try_ref(rl),
         }
     }
 
-    pub fn try_as_mut(&mut self, wl: &mut Writing) -> Option<&mut T>
+    pub fn try_mut(&mut self, wl: &mut Writing) -> Option<&mut T>
     {
         match self {
             Ref::Strong(s) => Some(s.as_mut(wl)),
-            Ref::Weak(w) => w.try_as_mut(wl),
+            Ref::Weak(w) => w.try_mut(wl),
         }
     }
 
