@@ -1,3 +1,10 @@
+#![feature(assert_matches)]
+
+//! # Gen
+
+#[cfg(test)]
+mod tests;
+
 use std::{
     cell::{Cell, RefCell},
     mem,
@@ -34,8 +41,12 @@ thread_local! {
 }
 
 struct Lock(Cell<isize>);
+
+#[derive(Debug)]
 pub struct Reading;
 pub fn reading() -> Option<Reading> { Lock::reading() }
+
+#[derive(Debug)]
 pub struct Writing;
 pub fn writing() -> Option<Writing> { Lock::writing() }
 
@@ -76,8 +87,8 @@ impl Drop for Reading
     fn drop(&mut self)
     {
         unsafe { Lock::unread() }
-        if let Some(wl) = Lock::writing() {
-            let d = DropQueue::clear(&wl);
+        if let Some(mut wl) = Lock::writing() {
+            let d = DropQueue::clear(&mut wl);
             mem::drop(wl);
             mem::drop(d);
         }
@@ -95,7 +106,11 @@ impl Clone for Reading
 
 impl Drop for Writing
 {
-    fn drop(&mut self) { unsafe { Lock::unwrite() } }
+    fn drop(&mut self)
+    {
+        DropQueue::clear(self);
+        unsafe { Lock::unwrite() }
+    }
 }
 
 struct FreeList(Vec<Generation>);
@@ -144,19 +159,18 @@ impl DropQueue
 {
     fn new() -> Self { Self(Vec::with_capacity(32)) }
 
-    fn clear_(&mut self, wl: &Writing) -> impl Drop + Sized
+    fn clear_(&mut self, _wl: &mut Writing) -> impl Drop
     {
         mem::replace(&mut self.0, Vec::with_capacity(32))
     }
 
-    fn clear(wl: &Writing) -> impl Drop + Sized { DROPQUEUE.with(|dq| dq.borrow_mut().clear_(wl)) }
+    fn clear(wl: &mut Writing) -> impl Drop { DROPQUEUE.with(|dq| dq.borrow_mut().clear_(wl)) }
 
-    fn defer_(&mut self, rl: &Reading, val: Box<dyn DropLater>) { self.0.push(val) }
-    fn defer(rl: &Reading, val: Box<dyn DropLater>)
-    {
-        DROPQUEUE.with(|dq| dq.borrow_mut().defer_(rl, val))
-    }
+    fn defer_(&mut self, val: Box<dyn DropLater>) { self.0.push(val) }
+    fn defer(val: Box<dyn DropLater>) { DROPQUEUE.with(|dq| dq.borrow_mut().defer_(val)) }
 }
+
+pub fn deferred() -> usize { DROPQUEUE.with(|dq| dq.borrow().0.len()) }
 
 use std::{mem::ManuallyDrop, ptr::NonNull};
 
@@ -183,11 +197,8 @@ impl<T: 'static> Drop for Strong<T>
             let d = unsafe { ManuallyDrop::take(&mut self.ptr) };
             mem::drop(wl);
             mem::drop(d);
-        } else if let Some(rl) = Lock::reading() {
-            DropQueue::defer(&rl, unsafe { ManuallyDrop::take(&mut self.ptr) }
-                as Box<dyn DropLater>);
         } else {
-            panic!()
+            DropQueue::defer(unsafe { ManuallyDrop::take(&mut self.ptr) } as Box<dyn DropLater>);
         }
     }
 }
@@ -211,7 +222,7 @@ impl<T: 'static> Strong<T>
         }
     }
 
-    pub fn take(mut self, wl: &Writing) -> Box<T>
+    pub fn take(mut self, _wl: &mut Writing) -> Box<T>
     {
         Generation::free(self.gen);
         let b = unsafe { ManuallyDrop::take(&mut self.ptr) };
@@ -219,13 +230,13 @@ impl<T: 'static> Strong<T>
         b
     }
 
-    pub fn as_ref(&self, rl: &Reading) -> &T { &self.ptr }
-    pub fn as_mut(&mut self, wl: &Writing) -> &mut T { &mut self.ptr }
+    pub fn as_ref(&self, _rl: &Reading) -> &T { &self.ptr }
+    pub fn as_mut(&mut self, _wl: &mut Writing) -> &mut T { &mut self.ptr }
 }
 
 impl<T: 'static> Weak<T>
 {
-    pub fn as_ref(&self, rl: &Reading) -> Option<&T>
+    pub fn as_ref(&self, _rl: &Reading) -> Option<&T>
     {
         if self.gen.get() == self.genref {
             Some(unsafe { self.ptr.as_ref() })
@@ -234,7 +245,7 @@ impl<T: 'static> Weak<T>
         }
     }
 
-    pub fn as_mut(&mut self, wl: &Writing) -> Option<&mut T>
+    pub fn as_mut(&mut self, _wl: &mut Writing) -> Option<&mut T>
     {
         if self.gen.get() == self.genref {
             Some(unsafe { self.ptr.as_mut() })
