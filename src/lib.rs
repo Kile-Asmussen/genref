@@ -238,13 +238,7 @@ impl<T: 'static> Drop for Strong<T>
 
 impl<T: 'static> Strong<T>
 {
-    pub fn new(b: Box<T>) -> Self
-    {
-        Self {
-            ptr: ManuallyDrop::new(b),
-            gen: Generation::new(),
-        }
-    }
+    pub fn new(t: T) -> Self { Self::from(Box::new(t)) }
 
     pub fn alias(&self) -> Weak<T>
     {
@@ -278,6 +272,17 @@ impl<T: 'static> Strong<T>
     }
 }
 
+impl<T: 'static> From<Box<T>> for Strong<T>
+{
+    fn from(b: Box<T>) -> Self
+    {
+        Self {
+            gen: Generation::new(),
+            ptr: ManuallyDrop::new(b),
+        }
+    }
+}
+
 impl<T: 'static> Weak<T>
 {
     pub fn dangling() -> Self
@@ -292,9 +297,11 @@ impl<T: 'static> Weak<T>
         res
     }
 
+    pub fn is_valid(&self) -> bool { self.genref == self.gen.get() }
+
     pub fn try_as_ref(&self, _rl: &Reading) -> Option<&T>
     {
-        if self.gen.get() == self.genref {
+        if self.is_valid() {
             Some(unsafe { self.ptr.as_ref() })
         } else {
             None
@@ -303,7 +310,7 @@ impl<T: 'static> Weak<T>
 
     pub fn try_as_mut(&mut self, _wl: &mut Writing) -> Option<&mut T>
     {
-        if self.gen.get() == self.genref {
+        if self.is_valid() {
             Some(unsafe { self.ptr.as_mut() })
         } else {
             None

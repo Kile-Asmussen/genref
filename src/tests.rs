@@ -1,5 +1,5 @@
 use crate::*;
-use std::{assert_matches::assert_matches, mem, rc::Rc};
+use std::{assert_matches::assert_matches, fs::read, mem, rc::Rc};
 
 #[test]
 fn many_readers()
@@ -40,7 +40,7 @@ fn reading_excludes_writing()
 #[test]
 fn strong_take()
 {
-    let a = Strong::new(Box::new(1));
+    let a = Strong::new(1);
     let mut w = writing().unwrap();
 
     assert_eq!(a.take(&mut w), Box::new(1));
@@ -49,7 +49,7 @@ fn strong_take()
 #[test]
 fn strong_reading()
 {
-    let a = Strong::new(Box::new(1));
+    let a = Strong::new(1);
     let r = reading().unwrap();
 
     assert_eq!(*a.as_ref(&r), 1);
@@ -58,7 +58,7 @@ fn strong_reading()
 #[test]
 fn weak_reading()
 {
-    let a = Strong::new(Box::new(1));
+    let a = Strong::new(1);
     let b = a.alias();
     let r = reading().unwrap();
 
@@ -68,7 +68,7 @@ fn weak_reading()
 #[test]
 fn strong_writing()
 {
-    let mut a = Strong::new(Box::new(1));
+    let mut a = Strong::new(1);
 
     let mut w = writing().unwrap();
     *a.as_mut(&mut w) = 2;
@@ -79,7 +79,7 @@ fn strong_writing()
 #[test]
 fn strong_writing_weak_reading()
 {
-    let mut a = Strong::new(Box::new(1));
+    let mut a = Strong::new(1);
     let b = a.alias();
 
     let mut w = writing().unwrap();
@@ -93,7 +93,7 @@ fn strong_writing_weak_reading()
 #[test]
 fn weak_writing_strong_reading()
 {
-    let a = Strong::new(Box::new(1));
+    let a = Strong::new(1);
     let mut b = a.alias();
 
     let mut w = writing().unwrap();
@@ -107,7 +107,7 @@ fn weak_writing_strong_reading()
 #[test]
 fn weak_writing_weak_reading()
 {
-    let a = Strong::new(Box::new(1));
+    let a = Strong::new(1);
     let mut b = a.alias();
     let c = b;
 
@@ -129,7 +129,7 @@ impl Drop for DropInc
 fn drop_later_if_reading()
 {
     let x = Rc::new(Cell::new(3));
-    let a = Strong::new(Box::new(DropInc(x.clone())));
+    let a = Strong::new(DropInc(x.clone()));
 
     let r = reading().unwrap();
 
@@ -146,7 +146,7 @@ fn drop_later_if_reading()
 fn drop_later_if_writing()
 {
     let x = Rc::new(Cell::new(3));
-    let a = Strong::new(Box::new(DropInc(x.clone())));
+    let a = Strong::new(DropInc(x.clone()));
 
     let w = writing().unwrap();
 
@@ -160,9 +160,20 @@ fn drop_later_if_writing()
 }
 
 #[test]
+fn drop_invalidates()
+{
+    let a = Strong::new(1);
+    let b = a.alias();
+
+    mem::drop(a);
+
+    assert!(!b.is_valid());
+}
+
+#[test]
 fn reading_invalid_weak_fails()
 {
-    let a = Strong::new(Box::new(1));
+    let a = Strong::new(1);
     let b = a.alias();
 
     mem::drop(a);
@@ -175,7 +186,7 @@ fn reading_invalid_weak_fails()
 #[test]
 fn writing_invalid_weak_fails()
 {
-    let a = Strong::new(Box::new(1));
+    let a = Strong::new(1);
     let mut b = a.alias();
 
     mem::drop(a);
