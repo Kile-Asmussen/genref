@@ -24,6 +24,8 @@ mod tests;
 #[cfg(feature = "global")]
 mod global;
 
+mod granular;
+
 use std::{
     cell::{Cell, RefCell},
     mem,
