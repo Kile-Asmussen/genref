@@ -1,3 +1,6 @@
+#![feature(local_key_cell_methods)]
+#![feature(assert_matches)]
+
 use std::{
     mem,
     ops::{Deref, DerefMut},

@@ -8,13 +8,17 @@ use std::{assert_matches::assert_matches, thread};
 use parking_lot::Mutex;
 
 #[cfg(test)]
-use crate::memory::counter::*;
+use crate::counter::LocalGeneration;
+
+#[cfg(test)]
+use crate::counter::*;
 
 #[cfg(test)]
 use super::Strong;
 
 #[test]
-fn local_allocation_single() {
+fn local_allocation_single()
+{
     for _ in 0..100 {
         LocalGeneration::free(LocalGeneration::new());
     }
@@ -23,7 +27,8 @@ fn local_allocation_single() {
 }
 
 #[test]
-fn local_allocation_multi() {
+fn local_allocation_multi()
+{
     let mut v = Vec::new();
 
     for _ in 0..100 {
@@ -49,10 +54,12 @@ fn local_allocation_multi() {
 static GLOBAL_TEST: Mutex<()> = Mutex::new(());
 
 #[test]
-fn global_allocation_single() {
+fn global_allocation_single()
+{
     let _lock = GLOBAL_TEST.lock();
 
-    fn thread() {
+    fn thread()
+    {
         for _ in 0..100 {
             GlobalGeneration::free(GlobalGeneration::new());
         }
@@ -70,10 +77,12 @@ fn global_allocation_single() {
 }
 
 #[test]
-fn global_allocation_multi() {
+fn global_allocation_multi()
+{
     let _lock = GLOBAL_TEST.lock();
 
-    fn thread() {
+    fn thread()
+    {
         let mut v = Vec::new();
 
         for _ in 0..100 {
@@ -105,7 +114,8 @@ fn global_allocation_multi() {
 }
 
 #[test]
-fn local_locking() {
+fn local_locking()
+{
     unsafe {
         let x = LocalGeneration::new();
 
@@ -134,7 +144,8 @@ fn local_locking() {
 }
 
 #[test]
-fn global_locking() {
+fn global_locking()
+{
     let _lock = GLOBAL_TEST.lock();
     unsafe {
         let x = GlobalGeneration::new();
@@ -165,7 +176,8 @@ fn global_locking() {
 }
 
 #[test]
-fn lock_state_transfers() {
+fn lock_state_transfers()
+{
     let _lock = GLOBAL_TEST.lock();
 
     let l = LocalGeneration::new();
@@ -198,7 +210,8 @@ fn lock_state_transfers() {
 }
 
 #[test]
-fn globalize_memoizes() {
+fn globalize_memoizes()
+{
     let _lock = GLOBAL_TEST.lock();
 
     let l = LocalGeneration::new();
@@ -212,7 +225,8 @@ fn globalize_memoizes() {
 }
 
 #[test]
-fn globalized_local_redirects() {
+fn globalized_local_redirects()
+{
     let _lock = GLOBAL_TEST.lock();
 
     let l = LocalGeneration::new();
@@ -250,7 +264,8 @@ fn globalized_local_redirects() {
 }
 
 #[test]
-fn strong_reading() {
+fn strong_reading()
+{
     let s = Strong::new(1u32);
 
     let p = s.try_read().unwrap();
@@ -263,7 +278,8 @@ fn strong_reading() {
 }
 
 #[test]
-fn strong_writing() {
+fn strong_writing()
+{
     let s = Strong::new(1u32);
 
     let mut p = s.try_write().unwrap();
@@ -282,7 +298,8 @@ fn strong_writing() {
 }
 
 #[test]
-fn weak_reading() {
+fn weak_reading()
+{
     let _s = Strong::new(1u32);
     let s = _s.alias();
 
@@ -296,7 +313,8 @@ fn weak_reading() {
 }
 
 #[test]
-fn weak_writing() {
+fn weak_writing()
+{
     let _s = Strong::new(1u32);
     let s = _s.alias();
 
@@ -316,7 +334,8 @@ fn weak_writing() {
 }
 
 #[test]
-fn shared_access() {
+fn shared_access()
+{
     let s = Strong::new(1);
     let w = s.alias();
 
@@ -327,7 +346,8 @@ fn shared_access() {
 }
 
 #[test]
-fn exclusive_access() {
+fn exclusive_access()
+{
     let s = Strong::new(1);
     let w = s.alias();
 
