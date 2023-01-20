@@ -14,20 +14,27 @@ mod tests;
 use counter::*;
 use pointers::*;
 
+/// Strong, owning reference to a heap allocation.
+///
+/// Behaves similar to `Box` in that when dropped, the underlying allocation is
+/// deallocated.
 #[repr(transparent)]
 pub struct Strong<T: 'static>(RawRef<T>);
 
 #[allow(dead_code)]
-impl<T: 'static> Strong<T> {
-    pub fn new(it: T) -> Self {
-        Self::from(Box::new(it))
-    }
+impl<T: 'static> Strong<T>
+{
+    /// Create a new allocation.
+    pub fn new(it: T) -> Self { Self::from(Box::new(it)) }
 
-    pub fn alias(&self) -> Weak<T> {
-        Weak(self.0)
-    }
+    /// Create a weak alias.
+    pub fn alias(&self) -> Weak<T> { Weak(self.0) }
 
-    pub fn try_take(self) -> Result<Box<T>, Self> {
+    /// Try to deallocate and extract the allocated value.
+    ///
+    /// Fails if there are any active acessor locks.
+    pub fn try_take(self) -> Result<Box<T>, Self>
+    {
         let gen = self.0.generation();
         if gen.try_lock_exclusive() {
             gen.bump();
@@ -43,7 +50,9 @@ impl<T: 'static> Strong<T> {
         }
     }
 
-    fn try_read(&self) -> Option<Reading<T>> {
+    /// Try to obtain a reading acessor lock.
+    pub fn try_read(&self) -> Option<Reading<T>>
+    {
         if self.0.generation().try_lock_shared() {
             Some(Reading(self.0))
         } else {
@@ -51,7 +60,9 @@ impl<T: 'static> Strong<T> {
         }
     }
 
-    fn try_write(&self) -> Option<Writing<T>> {
+    /// Try to obtain a writing acessor lock.
+    pub fn try_write(&self) -> Option<Writing<T>>
+    {
         if self.0.generation().try_lock_exclusive() {
             Some(Writing(self.0))
         } else {
@@ -59,21 +70,23 @@ impl<T: 'static> Strong<T> {
         }
     }
 
-    pub(crate) fn into_raw(self) -> RawRef<T> {
+    pub(crate) fn into_raw(self) -> RawRef<T>
+    {
         let mut res = self.0;
         res.ownership = OwnershipBit::Strong;
         mem::forget(self);
         res
     }
 
-    pub(crate) unsafe fn from_raw(it: RawRef<T>) -> Self {
-        Strong(it)
-    }
+    pub(crate) unsafe fn from_raw(it: RawRef<T>) -> Self { Strong(it) }
 }
 
 #[allow(dead_code)]
-impl<T: Send + Sync + 'static> Strong<T> {
-    pub fn send(mut self) -> Sending<T> {
+impl<T: Send + Sync + 'static> Strong<T>
+{
+    /// Transform this reference into a sendable form.
+    pub fn send(mut self) -> Sending<T>
+    {
         self = self.make_sharable();
         if let RawRefEnum::Global(res) = self.0.into() {
             std::mem::forget(self);
@@ -85,8 +98,10 @@ impl<T: Send + Sync + 'static> Strong<T> {
 }
 
 #[allow(dead_code)]
-impl<T: Sync + 'static> Strong<T> {
-    pub fn make_sharable(self) -> Self {
+impl<T: Sync + 'static> Strong<T>
+{
+    pub(crate) fn make_sharable(self) -> Self
+    {
         let res = Self(
             match self.0.into() {
                 RawRefEnum::Local(l) => l.globalize(),
@@ -99,8 +114,10 @@ impl<T: Sync + 'static> Strong<T> {
     }
 }
 
-impl<T: 'static> Drop for Strong<T> {
-    fn drop(&mut self) {
+impl<T: 'static> Drop for Strong<T>
+{
+    fn drop(&mut self)
+    {
         let gen = self.0.generation();
         gen.bump();
         if gen.try_lock_exclusive() {
@@ -111,18 +128,20 @@ impl<T: 'static> Drop for Strong<T> {
     }
 }
 
-impl<T> From<Sending<T>> for Strong<T> {
-    fn from(it: Sending<T>) -> Self {
-        Strong(it.0.into())
-    }
+impl<T> From<Sending<T>> for Strong<T>
+{
+    fn from(it: Sending<T>) -> Self { Strong(it.0.into()) }
 }
 
-impl<T> From<Box<T>> for Strong<T> {
-    fn from(it: Box<T>) -> Self {
+impl<T> From<Box<T>> for Strong<T>
+{
+    fn from(it: Box<T>) -> Self
+    {
+        let genptr = LocalGeneration::new();
         Self(
             LocalRaw {
-                genref: COUNTER_INIT,
-                genptr: LocalGeneration::new(),
+                genref: genptr.count(),
+                genptr,
                 boxptr: unsafe { NonNull::new_unchecked(Box::into_raw(it)) },
             }
             .into(),
@@ -130,36 +149,43 @@ impl<T> From<Box<T>> for Strong<T> {
     }
 }
 
+/// Sendable form of a `Strong` reference.
 #[repr(transparent)]
 pub struct Sending<T: 'static>(GlobalRaw<T>);
 unsafe impl<T: 'static + Send + Sync> Send for Sending<T> {}
-impl<T: 'static> Drop for Sending<T> {
-    fn drop(&mut self) {
-        let _ = unsafe { Strong::from_raw(self.0.into()) };
-    }
+impl<T: 'static> Drop for Sending<T>
+{
+    fn drop(&mut self) { let _ = unsafe { Strong::from_raw(self.0.into()) }; }
 }
 
 #[repr(transparent)]
 pub struct Sharing<T: 'static>(GlobalRaw<T>);
 unsafe impl<T: 'static + Sync> Send for Sharing<T> {}
 
-pub enum Transferrable<T: 'static> {
+/// Wrapper enum for transferring either strong or weak references between
+/// threads.
+pub enum Transferrable<T: 'static>
+{
     Send(Sending<T>),
     Sync(Sharing<T>),
 }
 
+/// Weak reference to a allocation, automatically becomes invalidated when its
+/// parent `Strong` reference goes out of scope.
 #[repr(transparent)]
 pub struct Weak<T: 'static>(RawRef<T>);
 impl<T: 'static> Copy for Weak<T> {}
-impl<T: 'static> Clone for Weak<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
+impl<T: 'static> Clone for Weak<T>
+{
+    fn clone(&self) -> Self { *self }
 }
 
 #[allow(dead_code)]
-impl<T: 'static + Sync> Weak<T> {
-    pub fn share(self) -> Sharing<T> {
+impl<T: 'static + Sync> Weak<T>
+{
+    /// Create a sendable copy of this reference.
+    pub fn share(self) -> Sharing<T>
+    {
         if let RawRefEnum::Global(g) = self.make_sharable().0.into() {
             Sharing(g)
         } else {
@@ -167,7 +193,8 @@ impl<T: 'static + Sync> Weak<T> {
         }
     }
 
-    pub fn make_sharable(self) -> Self {
+    pub(crate) fn make_sharable(self) -> Self
+    {
         Weak(
             match self.0.into() {
                 RawRefEnum::Local(l) => l.globalize(),
@@ -178,57 +205,71 @@ impl<T: 'static + Sync> Weak<T> {
     }
 }
 
-impl<T> From<Sharing<T>> for Weak<T> {
-    fn from(it: Sharing<T>) -> Self {
-        Weak(it.0.into())
-    }
+impl<T> From<Sharing<T>> for Weak<T>
+{
+    fn from(it: Sharing<T>) -> Self { Weak(it.0.into()) }
 }
 
 #[allow(dead_code)]
-impl<T> Weak<T> {
-    fn try_read(&self) -> Option<Reading<T>> {
-        let gen = self.0.generation();
-        if self.0.validity() == gen.count() {
+impl<T> Weak<T>
+{
+    /// Attempt to obtain a reading accessor lock for the underlying allocation.
+    pub fn try_read(&self) -> Option<Reading<T>>
+    {
+        if self.is_valid() {
             if self.0.generation().try_lock_shared() {
-                return Some(Reading(self.0));
+                if self.is_valid() {
+                    return Some(Reading(self.0));
+                } else {
+                    unsafe { self.0.generation().unlock_shared() }
+                }
             }
         }
         None
     }
 
-    fn try_write(&self) -> Option<Writing<T>> {
-        let gen = self.0.generation();
-        if self.0.validity() == gen.count() {
+    /// Attempt to obtain a writing accessor lock for the underlying allocation.
+    pub fn try_write(&self) -> Option<Writing<T>>
+    {
+        if self.is_valid() {
             if self.0.generation().try_lock_exclusive() {
-                return Some(Writing(self.0));
+                if self.is_valid() {
+                    return Some(Writing(self.0));
+                } else {
+                    unsafe { self.0.generation().unlock_exclusive() }
+                }
             }
         }
         None
     }
 
-    pub(crate) fn as_raw(self) -> RawRef<T> {
+    /// Check if parent `Strong` reference still exists.
+    pub fn is_valid(&self) -> bool { self.0.validity() == self.0.generation().count() }
+
+    pub(crate) fn as_raw(self) -> RawRef<T>
+    {
         let mut raw = self.0;
         raw.ownership = OwnershipBit::Weak;
         raw
     }
 
-    pub(crate) unsafe fn from_raw(it: RawRef<T>) -> Self {
-        Weak(it)
-    }
+    pub(crate) unsafe fn from_raw(it: RawRef<T>) -> Self { Weak(it) }
 }
 
+/// Reading acessor for the allocated objects. Obeys read-write lock semantics.
 pub struct Reading<T: 'static>(RawRef<T>);
 
-impl<T: 'static> Deref for Reading<T> {
+impl<T: 'static> Deref for Reading<T>
+{
     type Target = T;
 
-    fn deref(&self) -> &Self::Target {
-        unsafe { self.0.pointer().as_ref() }
-    }
+    fn deref(&self) -> &Self::Target { unsafe { self.0.pointer().as_ref() } }
 }
 
-impl<T: 'static> Clone for Reading<T> {
-    fn clone(&self) -> Self {
+impl<T: 'static> Clone for Reading<T>
+{
+    fn clone(&self) -> Self
+    {
         if !self.0.generation().try_lock_shared() {
             panic!()
         }
@@ -236,8 +277,10 @@ impl<T: 'static> Clone for Reading<T> {
     }
 }
 
-impl<T: 'static> Drop for Reading<T> {
-    fn drop(&mut self) {
+impl<T: 'static> Drop for Reading<T>
+{
+    fn drop(&mut self)
+    {
         let gen = self.0.generation();
         if self.0.validity() != gen.count() {
             if unsafe { gen.try_shared_into_exclusive() } {
@@ -251,24 +294,25 @@ impl<T: 'static> Drop for Reading<T> {
     }
 }
 
+/// Writing acessor for the allocated objects. Obeys read-write lock semantics.
 pub struct Writing<T: 'static>(RawRef<T>);
 
-impl<T: 'static> Deref for Writing<T> {
+impl<T: 'static> Deref for Writing<T>
+{
     type Target = T;
 
-    fn deref(&self) -> &Self::Target {
-        unsafe { self.0.pointer().as_ref() }
-    }
+    fn deref(&self) -> &Self::Target { unsafe { self.0.pointer().as_ref() } }
 }
 
-impl<T: 'static> DerefMut for Writing<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { self.0.pointer().as_mut() }
-    }
+impl<T: 'static> DerefMut for Writing<T>
+{
+    fn deref_mut(&mut self) -> &mut Self::Target { unsafe { self.0.pointer().as_mut() } }
 }
 
-impl<T: 'static> Drop for Writing<T> {
-    fn drop(&mut self) {
+impl<T: 'static> Drop for Writing<T>
+{
+    fn drop(&mut self)
+    {
         let gen = self.0.generation();
         if self.0.validity() != gen.count() {
             std::mem::drop(unsafe { Box::from_raw(self.0.pointer().as_ptr()) });
@@ -276,6 +320,69 @@ impl<T: 'static> Drop for Writing<T> {
             LocalOrGlobalGeneration::free(gen);
         } else {
             unsafe { gen.unlock_exclusive() }
+        }
+    }
+}
+
+/// A compact union of either a `Strong` or `Weak` reference.
+struct Universal<T: 'static>(RawRef<T>);
+
+impl<T: 'static> From<Strong<T>> for Universal<T>
+{
+    fn from(strong: Strong<T>) -> Self { Universal(strong.into_raw()) }
+}
+
+impl<T: 'static> From<Weak<T>> for Universal<T>
+{
+    fn from(weak: Weak<T>) -> Self { Universal(weak.as_raw()) }
+}
+
+impl<T: 'static> From<UniversalEnum<T>> for Universal<T>
+{
+    fn from(uni: UniversalEnum<T>) -> Self { 
+        match uni {
+            UniversalEnum::Strong(s) => s.into(),
+            UniversalEnum::Weak(w) => w.into()
+        }
+    }
+}
+
+impl<T: 'static> Clone for Universal<T> {
+    fn clone(&self) -> Self {
+        match self.0.ownership {
+            OwnershipBit::Nil => panic!(),
+            OwnershipBit::Weak => Universal(self.0),
+            OwnershipBit::Strong => ,
+            OwnershipBit::Inferred => panic!(),
+        }
+    }
+}
+
+/// A matchable version of `Universal`.
+pub enum UniversalEnum<T: 'static>
+{
+    Strong(Strong<T>),
+    Weak(Weak<T>),
+}
+
+impl<T: 'static> Clone for UniversalEnum<T> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Strong(s) => s.alias().into(),
+            Self::Weak(w) => w.into(),
+        }
+    }
+}
+
+impl<T: 'static> From<Universal<T>> for UniversalEnum<T>
+{
+    fn from(uni: Universal<T>) -> Self
+    {
+        match uni.0.ownership {
+            OwnershipBit::Nil => panic!(),
+            OwnershipBit::Weak => Self::Weak(unsafe { Weak::from_raw(uni.0) }),
+            OwnershipBit::Strong => Self::Strong(unsafe { Strong::from_raw(uni.0) }),
+            OwnershipBit::Inferred => panic!(),
         }
     }
 }
