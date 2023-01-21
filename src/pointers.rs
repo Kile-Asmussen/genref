@@ -7,24 +7,26 @@ use super::counter::*;
 macro_rules! clone_copy {
     ($t:ident) => {
         impl<T: 'static> Copy for $t<T> {}
-        impl<T: 'static> Clone for $t<T> {
-            fn clone(&self) -> Self {
-                *self
-            }
+        impl<T: 'static> Clone for $t<T>
+        {
+            fn clone(&self) -> Self { *self }
         }
     };
 }
 
 #[repr(C)]
-pub(crate) struct LocalRaw<T: 'static> {
+pub(crate) struct LocalRaw<T: 'static>
+{
     pub(crate) genptr: LocalGeneration,
     pub(crate) boxptr: NonNull<T>,
     pub(crate) genref: u32,
 }
 clone_copy!(LocalRaw);
 
-impl<T: 'static> LocalRaw<T> {
-    pub(crate) fn globalize(&self) -> GlobalRaw<T> {
+impl<T: 'static> LocalRaw<T>
+{
+    pub(crate) fn globalize(&self) -> GlobalRaw<T>
+    {
         let LocalRaw {
             genref,
             genptr,
@@ -40,7 +42,8 @@ impl<T: 'static> LocalRaw<T> {
 }
 
 #[repr(C)]
-pub(crate) struct GlobalRaw<T: 'static> {
+pub(crate) struct GlobalRaw<T: 'static>
+{
     pub(crate) genptr: GlobalGeneration,
     pub(crate) boxptr: NonNull<T>,
     pub(crate) genref: u32,
@@ -48,7 +51,8 @@ pub(crate) struct GlobalRaw<T: 'static> {
 clone_copy!(GlobalRaw);
 
 #[repr(C)]
-pub(crate) struct RawRef<T: 'static> {
+pub(crate) struct RawRef<T: 'static>
+{
     pub(crate) genptr: GenerationUnion,
     pub(crate) boxptr: NonNull<T>,
     pub(crate) genref: u32,
@@ -57,9 +61,28 @@ pub(crate) struct RawRef<T: 'static> {
 }
 clone_copy!(RawRef);
 
+impl<T> RawRef<T>
+{
+    pub(crate) unsafe fn ownership(&self) -> OwnershipBit { self.ownership }
+    pub(crate) unsafe fn discriminant(&self) -> LocalOrGlobal { self.discriminant }
+
+    pub(crate) unsafe fn set_weak(mut self) -> Self
+    {
+        self.ownership = OwnershipBit::Weak;
+        self
+    }
+
+    pub(crate) unsafe fn set_strong(mut self) -> Self
+    {
+        self.ownership = OwnershipBit::Strong;
+        self
+    }
+}
+
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LocalOrGlobal {
+pub(crate) enum LocalOrGlobal
+{
     Neither = 0,
     Local = 1,
     Global = 2,
@@ -67,7 +90,8 @@ pub(crate) enum LocalOrGlobal {
 
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum OwnershipBit {
+pub(crate) enum OwnershipBit
+{
     Nil = 0,
     Weak = 1,
     Strong = 2,
@@ -76,25 +100,26 @@ pub(crate) enum OwnershipBit {
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub(crate) union GenerationUnion {
+pub(crate) union GenerationUnion
+{
     pub(crate) local: LocalGeneration,
     pub(crate) global: GlobalGeneration,
 }
 
-impl From<LocalGeneration> for GenerationUnion {
-    fn from(local: LocalGeneration) -> Self {
-        Self { local }
-    }
+impl From<LocalGeneration> for GenerationUnion
+{
+    fn from(local: LocalGeneration) -> Self { Self { local } }
 }
 
-impl From<GlobalGeneration> for GenerationUnion {
-    fn from(global: GlobalGeneration) -> Self {
-        Self { global }
-    }
+impl From<GlobalGeneration> for GenerationUnion
+{
+    fn from(global: GlobalGeneration) -> Self { Self { global } }
 }
 
-impl<T: 'static> From<RawRefEnum<T>> for RawRef<T> {
-    fn from(it: RawRefEnum<T>) -> Self {
+impl<T: 'static> From<RawRefEnum<T>> for RawRef<T>
+{
+    fn from(it: RawRefEnum<T>) -> Self
+    {
         match it {
             RawRefEnum::Local(LocalRaw {
                 genptr,
@@ -122,13 +147,16 @@ impl<T: 'static> From<RawRefEnum<T>> for RawRef<T> {
     }
 }
 
-pub(crate) enum RawRefEnum<T: 'static> {
+pub(crate) enum RawRefEnum<T: 'static>
+{
     Local(LocalRaw<T>),
     Global(GlobalRaw<T>),
 }
 
-impl<T: 'static> From<RawRef<T>> for RawRefEnum<T> {
-    fn from(it: RawRef<T>) -> Self {
+impl<T: 'static> From<RawRef<T>> for RawRefEnum<T>
+{
+    fn from(it: RawRef<T>) -> Self
+    {
         let RawRef {
             genptr,
             boxptr,
@@ -152,62 +180,53 @@ impl<T: 'static> From<RawRef<T>> for RawRefEnum<T> {
     }
 }
 
-impl<T: 'static> From<LocalRaw<T>> for RawRef<T> {
-    fn from(it: LocalRaw<T>) -> Self {
-        RawRefEnum::Local(it).into()
-    }
+impl<T: 'static> From<LocalRaw<T>> for RawRef<T>
+{
+    fn from(it: LocalRaw<T>) -> Self { RawRefEnum::Local(it).into() }
 }
-impl<T: 'static> From<GlobalRaw<T>> for RawRef<T> {
-    fn from(it: GlobalRaw<T>) -> Self {
-        RawRefEnum::Global(it).into()
-    }
+impl<T: 'static> From<GlobalRaw<T>> for RawRef<T>
+{
+    fn from(it: GlobalRaw<T>) -> Self { RawRefEnum::Global(it).into() }
 }
 
-pub(crate) trait Reference<T: 'static> {
+pub(crate) trait Reference<T: 'static>
+{
     type Gen: Generation + GenerationCounter + AccessControl;
     fn pointer(&self) -> NonNull<T>;
     fn validity(&self) -> u32;
     fn generation(&self) -> Self::Gen;
 }
 
-impl<T: 'static> Reference<T> for LocalRaw<T> {
+impl<T: 'static> Reference<T> for LocalRaw<T>
+{
     type Gen = LocalGeneration;
 
     #[inline(always)]
-    fn pointer(&self) -> NonNull<T> {
-        self.boxptr
-    }
+    fn pointer(&self) -> NonNull<T> { self.boxptr }
     #[inline(always)]
-    fn validity(&self) -> u32 {
-        self.genref
-    }
+    fn validity(&self) -> u32 { self.genref }
     #[inline(always)]
-    fn generation(&self) -> Self::Gen {
-        self.genptr
-    }
+    fn generation(&self) -> Self::Gen { self.genptr }
 }
 
-impl<T: 'static> Reference<T> for GlobalRaw<T> {
+impl<T: 'static> Reference<T> for GlobalRaw<T>
+{
     type Gen = GlobalGeneration;
     #[inline(always)]
-    fn pointer(&self) -> NonNull<T> {
-        self.boxptr
-    }
+    fn pointer(&self) -> NonNull<T> { self.boxptr }
     #[inline(always)]
-    fn validity(&self) -> u32 {
-        self.genref
-    }
+    fn validity(&self) -> u32 { self.genref }
     #[inline(always)]
-    fn generation(&self) -> Self::Gen {
-        self.genptr
-    }
+    fn generation(&self) -> Self::Gen { self.genptr }
 }
 
-impl<T: 'static> Reference<T> for RawRef<T> {
+impl<T: 'static> Reference<T> for RawRef<T>
+{
     type Gen = LocalOrGlobalGeneration;
 
     #[inline(always)]
-    fn pointer(&self) -> NonNull<T> {
+    fn pointer(&self) -> NonNull<T>
+    {
         match (*self).into() {
             RawRefEnum::Local(l) => l.pointer(),
             RawRefEnum::Global(g) => g.pointer(),
@@ -215,7 +234,8 @@ impl<T: 'static> Reference<T> for RawRef<T> {
     }
 
     #[inline(always)]
-    fn validity(&self) -> u32 {
+    fn validity(&self) -> u32
+    {
         match (*self).into() {
             RawRefEnum::Local(l) => l.validity(),
             RawRefEnum::Global(g) => g.validity(),
@@ -223,7 +243,8 @@ impl<T: 'static> Reference<T> for RawRef<T> {
     }
 
     #[inline(always)]
-    fn generation(&self) -> Self::Gen {
+    fn generation(&self) -> Self::Gen
+    {
         match (*self).into() {
             RawRefEnum::Local(l) => Self::Gen::Local(l.generation()),
             RawRefEnum::Global(g) => Self::Gen::Global(g.generation()),
@@ -232,7 +253,8 @@ impl<T: 'static> Reference<T> for RawRef<T> {
 }
 
 #[test]
-fn size_concerns() {
+fn size_concerns()
+{
     assert_eq!(
         mem::size_of::<LocalRaw<String>>(),
         mem::size_of::<(usize, usize, u32)>()

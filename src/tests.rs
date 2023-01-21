@@ -381,3 +381,6 @@ fn exclusive_access()
         assert!(s.try_write().is_none());
     }
 }
+
+#[test]
+fn 
