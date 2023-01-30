@@ -7,7 +7,8 @@ use std::{
 use lock_api::{RawRwLock, RawRwLockDowngrade, RawRwLockUpgrade};
 use parking_lot::Mutex;
 
-pub(crate) trait Generation: Sized {
+pub(crate) trait Generation: Sized
+{
     fn free(this: Self);
 }
 
@@ -15,16 +16,14 @@ pub(crate) trait Generation: Sized {
 #[derive(Clone, Copy)]
 pub(crate) struct LocalGeneration(pub(crate) NonNull<LocalCounter>);
 
-impl LocalGeneration {
-    pub(crate) fn new() -> Self {
-        Self::re_use().unwrap_or_else(Self::fresh)
-    }
+impl LocalGeneration
+{
+    pub(crate) fn new() -> Self { Self::re_use().unwrap_or_else(Self::fresh) }
 
-    pub(crate) fn globalize(&self) -> GlobalGeneration {
-        unsafe { self.0.as_ref() }.globalize()
-    }
+    pub(crate) fn globalize(&self) -> GlobalGeneration { unsafe { self.0.as_ref() }.globalize() }
 
-    fn fresh() -> Self {
+    fn fresh() -> Self
+    {
         let mut fresh = Self::FRESH_LIST.with(|c| c.replace(vec![].into_boxed_slice()));
         let mut next = Self::NEXT_FRESH.with(Cell::get);
 
@@ -42,9 +41,7 @@ impl LocalGeneration {
         res
     }
 
-    fn re_use() -> Option<Self> {
-        Self::FREE_LIST.with_borrow_mut(Vec::pop)
-    }
+    fn re_use() -> Option<Self> { Self::FREE_LIST.with_borrow_mut(Vec::pop) }
 
     thread_local! {
         static FREE_LIST : RefCell<Vec<LocalGeneration>> = RefCell::new(Vec::new());
@@ -55,28 +52,25 @@ impl LocalGeneration {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn allocations() -> usize {
-        Self::ALLOCATED_COUNTERS.with(Cell::get)
-    }
+    pub(crate) fn allocations() -> usize { Self::ALLOCATED_COUNTERS.with(Cell::get) }
 
     #[allow(dead_code)]
-    pub(crate) fn free_list_size() -> usize {
-        Self::FREE_LIST.with_borrow(Vec::len)
-    }
+    pub(crate) fn free_list_size() -> usize { Self::FREE_LIST.with_borrow(Vec::len) }
 
     #[inline(always)]
-    fn delegate<R>(&self, f: fn(&LocalCounter) -> R) -> R {
-        f(unsafe { self.0.as_ref() })
-    }
+    fn delegate<R>(&self, f: fn(&LocalCounter) -> R) -> R { f(unsafe { self.0.as_ref() }) }
 
     #[inline(always)]
-    unsafe fn unsafe_delegate<R>(&self, f: unsafe fn(&LocalCounter) -> R) -> R {
+    unsafe fn unsafe_delegate<R>(&self, f: unsafe fn(&LocalCounter) -> R) -> R
+    {
         f(self.0.as_ref())
     }
 }
 
-impl Generation for LocalGeneration {
-    fn free(this: Self) {
+impl Generation for LocalGeneration
+{
+    fn free(this: Self)
+    {
         if this.count() != 0 {
             Self::FREE_LIST.with_borrow_mut(|v| v.push(this))
         }
@@ -87,13 +81,13 @@ impl Generation for LocalGeneration {
 #[derive(Clone, Copy)]
 pub(crate) struct GlobalGeneration(pub(crate) &'static GlobalCounter);
 
-impl GlobalGeneration {
+impl GlobalGeneration
+{
     #[allow(dead_code)]
-    pub(crate) fn new() -> Self {
-        Self::re_use().unwrap_or_else(Self::fresh)
-    }
+    pub(crate) fn new() -> Self { Self::re_use().unwrap_or_else(Self::fresh) }
 
-    fn fresh() -> Self {
+    fn fresh() -> Self
+    {
         let mut fresh = FRESH_LIST.lock();
 
         if fresh.1.len() == 0 {
@@ -111,11 +105,10 @@ impl GlobalGeneration {
         res
     }
 
-    fn re_use() -> Option<Self> {
-        FREE_LIST.lock().pop()
-    }
+    fn re_use() -> Option<Self> { FREE_LIST.lock().pop() }
 
-    fn from_local(rlc: RawLocalCounter) -> Self {
+    fn from_local(rlc: RawLocalCounter) -> Self
+    {
         let this = Self::fresh();
 
         this.0.set_gen(rlc.count());
@@ -126,16 +119,13 @@ impl GlobalGeneration {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn allocations() -> usize {
-        ALLOCATED_COUNTERS.load(Relaxed)
-    }
+    pub(crate) fn allocations() -> usize { ALLOCATED_COUNTERS.load(Relaxed) }
 
     #[allow(dead_code)]
-    pub(crate) fn free_list_size() -> usize {
-        FREE_LIST.lock().len()
-    }
+    pub(crate) fn free_list_size() -> usize { FREE_LIST.lock().len() }
 
-    pub(crate) fn leak_all_and_reset() {
+    pub(crate) fn leak_all_and_reset()
+    {
         let mut x = FREE_LIST.lock();
         let mut y = FRESH_LIST.lock();
         *x = Vec::new();
@@ -143,14 +133,10 @@ impl GlobalGeneration {
     }
 
     #[inline(always)]
-    fn delegate<R>(&self, f: fn(&GlobalCounter) -> R) -> R {
-        f(self.0)
-    }
+    fn delegate<R>(&self, f: fn(&GlobalCounter) -> R) -> R { f(self.0) }
 
     #[inline(always)]
-    unsafe fn unsafe_delegate<R>(&self, f: unsafe fn(&GlobalCounter) -> R) -> R {
-        f(self.0)
-    }
+    unsafe fn unsafe_delegate<R>(&self, f: unsafe fn(&GlobalCounter) -> R) -> R { f(self.0) }
 }
 
 lazy_static::lazy_static! {
@@ -159,8 +145,10 @@ lazy_static::lazy_static! {
     static ref ALLOCATED_COUNTERS : AtomicUsize = AtomicUsize::new(0);
 }
 
-impl Generation for GlobalGeneration {
-    fn free(this: Self) {
+impl Generation for GlobalGeneration
+{
+    fn free(this: Self)
+    {
         if this.count() != 0 {
             FREE_LIST.lock().push(this)
         }
@@ -168,14 +156,17 @@ impl Generation for GlobalGeneration {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum LocalOrGlobalGeneration {
+pub(crate) enum LocalOrGlobalGeneration
+{
     Local(LocalGeneration),
     Global(GlobalGeneration),
 }
 
-impl LocalOrGlobalGeneration {
+impl LocalOrGlobalGeneration
+{
     #[inline(always)]
-    fn delegate<R>(&self, fl: fn(&LocalGeneration) -> R, fg: fn(&GlobalGeneration) -> R) -> R {
+    fn delegate<R>(&self, fl: fn(&LocalGeneration) -> R, fg: fn(&GlobalGeneration) -> R) -> R
+    {
         match self {
             Self::Local(l) => fl(l),
             Self::Global(g) => fg(g),
@@ -184,10 +175,9 @@ impl LocalOrGlobalGeneration {
 
     #[inline(always)]
     unsafe fn unsafe_delegate<R>(
-        &self,
-        fl: unsafe fn(&LocalGeneration) -> R,
-        fg: unsafe fn(&GlobalGeneration) -> R,
-    ) -> R {
+        &self, fl: unsafe fn(&LocalGeneration) -> R, fg: unsafe fn(&GlobalGeneration) -> R,
+    ) -> R
+    {
         match self {
             Self::Local(l) => fl(l),
             Self::Global(g) => fg(g),
@@ -195,9 +185,11 @@ impl LocalOrGlobalGeneration {
     }
 }
 
-impl Generation for LocalOrGlobalGeneration {
+impl Generation for LocalOrGlobalGeneration
+{
     #[inline(always)]
-    fn free(this: Self) {
+    fn free(this: Self)
+    {
         this.delegate(
             |l| LocalGeneration::free(*l),
             |g| GlobalGeneration::free(*g),
@@ -207,12 +199,12 @@ impl Generation for LocalOrGlobalGeneration {
 
 pub(crate) struct LocalCounter(pub(crate) Cell<LocalOrGlobalCounter>);
 
-impl LocalCounter {
-    fn new() -> Self {
-        Self(Cell::new(LocalOrGlobalCounter::new()))
-    }
+impl LocalCounter
+{
+    fn new() -> Self { Self(Cell::new(LocalOrGlobalCounter::new())) }
 
-    pub(crate) fn globalize(&self) -> GlobalGeneration {
+    pub(crate) fn globalize(&self) -> GlobalGeneration
+    {
         let res = match self.0.replace(LocalOrGlobalCounter::Placeholder) {
             LocalOrGlobalCounter::Placeholder => panic!(),
             LocalOrGlobalCounter::Local(l) => GlobalGeneration::from_local(l),
@@ -223,7 +215,8 @@ impl LocalCounter {
     }
 
     #[inline(always)]
-    fn delegate<R>(&self, f: fn(&LocalOrGlobalCounter) -> R) -> R {
+    fn delegate<R>(&self, f: fn(&LocalOrGlobalCounter) -> R) -> R
+    {
         let log = self.0.replace(LocalOrGlobalCounter::Placeholder);
         let res = f(&log);
         self.0.set(log);
@@ -231,7 +224,8 @@ impl LocalCounter {
     }
 
     #[inline(always)]
-    unsafe fn unsafe_delegate<R>(&self, f: unsafe fn(&LocalOrGlobalCounter) -> R) -> R {
+    unsafe fn unsafe_delegate<R>(&self, f: unsafe fn(&LocalOrGlobalCounter) -> R) -> R
+    {
         let log = self.0.replace(LocalOrGlobalCounter::Placeholder);
         let res = f(&log);
         self.0.set(log);
@@ -239,19 +233,20 @@ impl LocalCounter {
     }
 }
 
-pub(crate) enum LocalOrGlobalCounter {
+pub(crate) enum LocalOrGlobalCounter
+{
     Placeholder,
     Local(RawLocalCounter),
     Global(GlobalGeneration),
 }
 
-impl LocalOrGlobalCounter {
-    fn new() -> Self {
-        Self::Local(RawLocalCounter::new())
-    }
+impl LocalOrGlobalCounter
+{
+    fn new() -> Self { Self::Local(RawLocalCounter::new()) }
 
     #[inline(always)]
-    fn delegate<R>(&self, fl: fn(&RawLocalCounter) -> R, fg: fn(&GlobalGeneration) -> R) -> R {
+    fn delegate<R>(&self, fl: fn(&RawLocalCounter) -> R, fg: fn(&GlobalGeneration) -> R) -> R
+    {
         match self {
             Self::Placeholder => panic!(),
             Self::Local(l) => fl(l),
@@ -261,10 +256,9 @@ impl LocalOrGlobalCounter {
 
     #[inline(always)]
     unsafe fn unsafe_delegate<R>(
-        &self,
-        fl: unsafe fn(&RawLocalCounter) -> R,
-        fg: unsafe fn(&GlobalGeneration) -> R,
-    ) -> R {
+        &self, fl: unsafe fn(&RawLocalCounter) -> R, fg: unsafe fn(&GlobalGeneration) -> R,
+    ) -> R
+    {
         match self {
             Self::Placeholder => panic!(),
             Self::Local(l) => fl(l),
@@ -275,20 +269,24 @@ impl LocalOrGlobalCounter {
 
 pub(crate) const COUNTER_INIT: u32 = 1;
 
-pub(crate) struct GlobalCounter {
+pub(crate) struct GlobalCounter
+{
     pub(crate) access: parking_lot::RawRwLock,
     pub(crate) counter: AtomicU32,
 }
 
-impl GlobalCounter {
-    pub(crate) fn new() -> Self {
+impl GlobalCounter
+{
+    pub(crate) fn new() -> Self
+    {
         Self {
             access: parking_lot::RawRwLock::INIT,
             counter: AtomicU32::new(COUNTER_INIT),
         }
     }
 
-    fn set_gen(&self, gen: u32) -> bool {
+    fn set_gen(&self, gen: u32) -> bool
+    {
         loop {
             let n = self.counter.load(Relaxed);
             if gen <= n {
@@ -305,42 +303,49 @@ impl GlobalCounter {
     }
 
     #[inline(always)]
-    fn delegate<R>(&self, f: fn(&parking_lot::RawRwLock) -> R) -> R {
-        f(&self.access)
-    }
+    fn delegate<R>(&self, f: fn(&parking_lot::RawRwLock) -> R) -> R { f(&self.access) }
 
     #[inline(always)]
-    unsafe fn unsafe_delegate<R>(&self, f: unsafe fn(&parking_lot::RawRwLock) -> R) -> R {
+    unsafe fn unsafe_delegate<R>(&self, f: unsafe fn(&parking_lot::RawRwLock) -> R) -> R
+    {
         f(&self.access)
     }
 }
 
-pub(crate) struct RawLocalCounter {
+pub(crate) struct RawLocalCounter
+{
     pub(crate) access: Cell<i32>,
     pub(crate) counter: Cell<u32>,
 }
 
-impl RawLocalCounter {
-    fn new() -> Self {
+impl RawLocalCounter
+{
+    fn new() -> Self
+    {
         Self {
             access: Cell::new(0),
             counter: Cell::new(COUNTER_INIT),
         }
     }
 
-    fn access_state(&self) -> AccessState {
-        AccessState::new(self.access.get())
-    }
+    fn access_state(&self) -> AccessState { AccessState::new(self.access.get()) }
 }
 
-enum AccessState {
-    Readers { normal: i32, upgrade: bool },
+enum AccessState
+{
+    Readers
+    {
+        normal: i32,
+        upgrade: bool,
+    },
     Writer,
     None,
 }
 
-impl AccessState {
-    fn new(desc: i32) -> Self {
+impl AccessState
+{
+    fn new(desc: i32) -> Self
+    {
         match desc {
             1.. => Self::Readers {
                 normal: desc / 2,
@@ -352,7 +357,8 @@ impl AccessState {
         }
     }
 
-    fn inflict(&self, access: &parking_lot::RawRwLock) {
+    fn inflict(&self, access: &parking_lot::RawRwLock)
+    {
         use AccessState::*;
         match self {
             Readers { normal, upgrade } => {
@@ -369,7 +375,8 @@ impl AccessState {
     }
 }
 
-pub(crate) trait AccessControl {
+pub(crate) trait AccessControl
+{
     fn try_lock_shared(&self) -> bool;
     fn try_lock_exclusive(&self) -> bool;
     fn try_lock_upgradable(&self) -> bool;
@@ -385,13 +392,16 @@ pub(crate) trait AccessControl {
     unsafe fn try_shared_into_exclusive(&self) -> bool;
 }
 
-pub(crate) trait GenerationCounter {
+pub(crate) trait GenerationCounter
+{
     fn bump(&self);
     fn count(&self) -> u32;
 }
 
-impl GenerationCounter for RawLocalCounter {
-    fn bump(&self) {
+impl GenerationCounter for RawLocalCounter
+{
+    fn bump(&self)
+    {
         let mut n = self.counter.get();
         if n != 0 {
             n = n.wrapping_add(1);
@@ -399,13 +409,13 @@ impl GenerationCounter for RawLocalCounter {
         }
     }
 
-    fn count(&self) -> u32 {
-        self.counter.get()
-    }
+    fn count(&self) -> u32 { self.counter.get() }
 }
 
-impl AccessControl for RawLocalCounter {
-    fn try_lock_shared(&self) -> bool {
+impl AccessControl for RawLocalCounter
+{
+    fn try_lock_shared(&self) -> bool
+    {
         if self.access.get() >= 0 {
             self.access.set(self.access.get() + 2);
             true
@@ -414,7 +424,8 @@ impl AccessControl for RawLocalCounter {
         }
     }
 
-    fn try_lock_exclusive(&self) -> bool {
+    fn try_lock_exclusive(&self) -> bool
+    {
         if self.access.get() == 0 {
             self.access.set(-1);
             true
@@ -423,7 +434,8 @@ impl AccessControl for RawLocalCounter {
         }
     }
 
-    fn try_lock_upgradable(&self) -> bool {
+    fn try_lock_upgradable(&self) -> bool
+    {
         if self.access.get() & 1 == 0 {
             self.access.set(self.access.get() | 1);
             true
@@ -432,15 +444,14 @@ impl AccessControl for RawLocalCounter {
         }
     }
 
-    unsafe fn downgrade(&self) {
-        self.access.set(2);
-    }
+    unsafe fn downgrade(&self) { self.access.set(2); }
 
     // unsafe fn downgrade_to_upgradable(&self) {}
 
     //unsafe fn downgrade_upgradable(&self) {}
 
-    unsafe fn try_upgrade(&self) -> bool {
+    unsafe fn try_upgrade(&self) -> bool
+    {
         if self.access.get() == 1 {
             self.access.set(-1);
             true
@@ -449,19 +460,14 @@ impl AccessControl for RawLocalCounter {
         }
     }
 
-    unsafe fn unlock_shared(&self) {
-        self.access.set(self.access.get() - 2);
-    }
+    unsafe fn unlock_shared(&self) { self.access.set(self.access.get() - 2); }
 
-    unsafe fn unlock_exclusive(&self) {
-        self.access.set(0);
-    }
+    unsafe fn unlock_exclusive(&self) { self.access.set(0); }
 
-    unsafe fn unlock_upgradable(&self) {
-        self.access.set(self.access.get() & !1);
-    }
+    unsafe fn unlock_upgradable(&self) { self.access.set(self.access.get() & !1); }
 
-    unsafe fn try_shared_into_exclusive(&self) -> bool {
+    unsafe fn try_shared_into_exclusive(&self) -> bool
+    {
         if self.access.get() == 2 {
             self.access.set(-1);
             true
@@ -486,8 +492,10 @@ macro_rules! delegate {
     };
 }
 
-impl GenerationCounter for GlobalCounter {
-    fn bump(&self) {
+impl GenerationCounter for GlobalCounter
+{
+    fn bump(&self)
+    {
         loop {
             let n = self.counter.load(Relaxed);
             if n == 0 {
@@ -504,12 +512,11 @@ impl GenerationCounter for GlobalCounter {
         }
     }
 
-    fn count(&self) -> u32 {
-        self.counter.load(Relaxed)
-    }
+    fn count(&self) -> u32 { self.counter.load(Relaxed) }
 }
 
-impl AccessControl for GlobalCounter {
+impl AccessControl for GlobalCounter
+{
     // fn try_lock_shared(&self) -> bool {
     //     self.access.try_lock_shared_recursive()
     // }
@@ -524,7 +531,8 @@ impl AccessControl for GlobalCounter {
     delegate!(unsafe fn unlock_upgradable -> (), parking_lot::RawRwLock);
     delegate!(unsafe fn unlock_exclusive -> (), parking_lot::RawRwLock);
 
-    unsafe fn try_shared_into_exclusive(&self) -> bool {
+    unsafe fn try_shared_into_exclusive(&self) -> bool
+    {
         if self.access.try_lock_upgradable() {
             self.access.unlock_shared();
             if self.access.try_upgrade() {
