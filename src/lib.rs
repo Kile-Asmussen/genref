@@ -345,7 +345,7 @@ struct Universal<T: 'static>(RawRef<T>);
 
 impl<T: 'static> Drop for Universal<T>
 {
-    fn drop(&mut self) { UniversalEnum::from(unsafe { std::ptr::read(self) }); }
+    fn drop(&mut self) { let _ = UniversalEnum::from(unsafe { std::ptr::read(self) }); }
 }
 
 impl<T: 'static> From<Strong<T>> for Universal<T>

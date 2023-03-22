@@ -14,7 +14,10 @@ use crate::counter::LocalGeneration;
 use crate::counter::*;
 
 #[cfg(test)]
-use super::Strong;
+use crate::pointers::*;
+
+#[cfg(test)]
+use super::{Sending, Sharing, Strong, Transferrable, Universal, UniversalEnum, Weak};
 
 #[test]
 fn local_allocation_single()
@@ -383,4 +386,17 @@ fn exclusive_access()
 }
 
 #[test]
-fn 
+fn ownership_bit_is_correct()
+{
+    let _lock = GLOBAL_TEST.lock();
+
+    let s = Strong::new(0);
+    let q = Strong::new(0);
+    let w = q.alias();
+
+    assert_eq!(s.0.ownership(), OwnershipBit::Strong);
+    assert_eq!(w.0.ownership(), OwnershipBit::Weak);
+
+    assert_eq!(Strong::from(s.send()).0.ownership(), OwnershipBit::Strong);
+    assert_eq!(Weak::from(w.share()).0.ownership(), OwnershipBit::Weak);
+}

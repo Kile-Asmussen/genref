@@ -63,8 +63,8 @@ clone_copy!(RawRef);
 
 impl<T> RawRef<T>
 {
-    pub(crate) unsafe fn ownership(&self) -> OwnershipBit { self.ownership }
-    pub(crate) unsafe fn discriminant(&self) -> LocalOrGlobal { self.discriminant }
+    pub(crate) fn ownership(&self) -> OwnershipBit { self.ownership }
+    pub(crate) fn discriminant(&self) -> LocalOrGlobal { self.discriminant }
 
     pub(crate) unsafe fn set_weak(mut self) -> Self
     {
@@ -89,7 +89,7 @@ pub(crate) enum LocalOrGlobal
 }
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum OwnershipBit
 {
     Nil = 0,
