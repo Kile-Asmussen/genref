@@ -3,7 +3,9 @@ use lock_api::{RawRwLock, RawRwLockUpgrade};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::*;
+use crate::tracking::Tracking;
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct GlobalIndex(&'static GlobalAccount);
 
@@ -91,4 +93,10 @@ lazy_static! {
 
 fn recycle() -> Option<GlobalIndex> { FREE_LIST.write().pop() }
 
-pub(crate) fn free(li: GlobalIndex) { FREE_LIST.write().push(li) }
+/// assumes exclusive lock
+pub(crate) unsafe fn free(gi: GlobalIndex)
+{
+    gi.invalidate();
+    gi.unlock_exclusive();
+    FREE_LIST.write().push(gi)
+}

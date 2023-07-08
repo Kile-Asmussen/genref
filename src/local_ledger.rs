@@ -1,10 +1,11 @@
 use super::global_ledger::*;
-use super::*;
+use super::{tracking::Tracking, *};
 use std::{
     cell::{Cell, Ref, RefCell},
     ptr::NonNull,
 };
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LocalIndex(NonNull<RefCell<LocalAccount>>);
 
@@ -13,19 +14,25 @@ impl LocalIndex
     fn borrow(&self) -> Ref<LocalAccount> { unsafe { self.0.as_ref() }.borrow() }
 
     // assumes exclusive lock
-    pub(crate) unsafe fn make_sharable(&self)
+    pub(crate) unsafe fn make_sharable(&self) -> GlobalIndex
     {
         let mut cell = self.0.as_ref().borrow_mut();
+        let res: GlobalIndex;
         let acc = LocalAccount::Global(match &*cell {
             LocalAccount::Local(l) => {
-                let res = global_ledger::allocate();
+                res = global_ledger::allocate();
                 if !res.try_lock_exclusive() {
                     panic!("failed to exclusive lock just-allocated global index")
                 }
                 res
             }
-            LocalAccount::Global(g) => *g,
+            LocalAccount::Global(g) => {
+                res = *g;
+                res
+            }
         });
+        *cell = acc;
+        res
     }
 }
 
@@ -213,4 +220,9 @@ fn fresh() -> LocalIndex
 
 fn recycle() -> Option<LocalIndex> { FREE_LIST.with_borrow_mut(|vec| vec.pop()) }
 
-pub(crate) fn free(li: LocalIndex) { FREE_LIST.with_borrow_mut(|vec| vec.push(li)) }
+pub(crate) unsafe fn free(li: LocalIndex)
+{
+    li.invalidate();
+    li.unlock_exclusive();
+    FREE_LIST.with_borrow_mut(|vec| vec.push(li))
+}
