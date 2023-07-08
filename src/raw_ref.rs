@@ -127,11 +127,35 @@ impl<T> RawRef<T>
         res
     }
 
+    unsafe fn try_consume(&self, locking_primitive: fn(&AccountEnum) -> bool) -> Option<Box<T>>
+    {
+        self.invariant();
+        let account = self.account();
+        if locking_primitive(&account) {
+            tracking::free(account);
+            Some(Box::from_raw(self.pointer().as_ptr().as_ptr()))
+        } else {
+            None
+        }
+    }
+
+    pub(crate) unsafe fn try_consume_exclusive(&self) -> Option<Box<T>>
+    {
+        self.try_consume(AccountEnum::try_lock_exclusive)
+    }
+
+    pub(crate) unsafe fn try_consume_shared(&self) -> Option<Box<T>>
+    {
+        self.try_consume(AccountEnum::try_upgrade)
+    }
+
     pub(crate) fn map<F, U>(self, f: F) -> RawRef<U>
     where
         F: FnOnce(NonNull<T>) -> NonNull<U>,
     {
-        RawRef::new_from_parts(self.account(), self.pointer().map(f))
+        let res = RawRef::new_from_parts(self.account(), self.pointer().map(f));
+        res.invariant();
+        res
     }
 
     pub(crate) fn account(&self) -> AccountEnum

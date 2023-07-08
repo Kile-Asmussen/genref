@@ -6,10 +6,17 @@ mod local_ledger;
 mod raw_ref;
 mod tracking;
 
-use std::{assert_matches::assert_matches, io::Read, ptr::NonNull};
+use std::{
+    assert_matches::assert_matches,
+    io::Read,
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+    os::linux::raw,
+    ptr::NonNull,
+};
 
 use raw_ref::*;
-use tracking::Tracking;
+use tracking::{AccountEnum, Tracking};
 
 pub struct Strong<T>(RawRef<T>);
 
@@ -29,21 +36,6 @@ impl<T> Strong<T>
     #[cfg(not(test))]
     fn invariant(&self) {}
 
-    unsafe fn try_consume_inplace(&self) -> Option<Box<T>>
-    {
-        self.invariant();
-        let account = self.0.account();
-        if account.try_lock_exclusive() {
-            unsafe { tracking::free(account) }
-            Some(match self.0.pointer() {
-                PointerEnum::Strong(s) => unsafe { Box::from_raw(s.as_ptr()) },
-                _ => panic!(),
-            })
-        } else {
-            None
-        }
-    }
-
     pub fn from_box(it: Box<T>) -> Self
     {
         let res = Self(RawRef::from_box(it));
@@ -57,7 +49,7 @@ impl<T> Strong<T>
     {
         let acc = self.0.account();
         let ptr = self.0.pointer();
-        Weak(
+        Weak::new(
             self.0
                 .clone()
                 .set_weak()
@@ -69,7 +61,13 @@ impl<T> Strong<T>
 
     pub fn try_take(mut self) -> Result<Box<T>, Self>
     {
-        unsafe { self.try_consume_inplace() }.ok_or_else(|| self)
+        self.invariant();
+        if let Some(b) = unsafe { self.0.try_consume_exclusive() } {
+            std::mem::forget(self);
+            Ok(b)
+        } else {
+            Err(self)
+        }
     }
 
     fn try_read(&self) -> Option<Reading<T>>
@@ -89,8 +87,9 @@ impl<T> Drop for Strong<T>
 {
     fn drop(&mut self)
     {
+        self.invariant();
         unsafe {
-            self.try_consume_inplace();
+            self.0.try_consume_exclusive();
         }
     }
 }
@@ -113,9 +112,16 @@ impl<T> Weak<T>
         )
     }
 
-    fn try_read(&self) -> Reading<T> {}
+    fn new(raw_ref: RawRef<T>) -> Self
+    {
+        let res = Weak(raw_ref);
+        res.invariant();
+        res
+    }
 
-    fn try_write(&self) -> Writing<T> { todo!() }
+    pub fn try_read(&self) -> Option<Reading<T>> { Reading::try_new(self.0.clone()) }
+
+    pub fn try_write(&self) -> Option<Writing<T>> { Writing::try_new(self.0.clone()) }
 }
 
 struct GenRef<T>(RawRef<T>);
@@ -125,43 +131,90 @@ pub enum GenRefEnum<T>
     Strong(Strong<T>),
 }
 
-pub struct Reading<T>(RawRef<T>);
+pub struct Reading<'a, T>(RawRef<T>, PhantomData<&'a ()>);
 
-impl<T> Reading<T>
+impl<'a, T> Reading<'a, T>
 {
+    fn invariant(&self) { self.0.invariant(); }
+
     pub(crate) fn try_new(raw_ref: RawRef<T>) -> Option<Self>
     {
         raw_ref.invariant();
         if raw_ref.account().try_lock_shared() {
-            Some(Self(raw_ref))
+            let res = Self(raw_ref, PhantomData);
+            res.invariant();
+            Some(res)
         } else {
             None
         }
     }
 }
 
-impl<T> Clone for Reading<T>
+impl<'a, T> Deref for Reading<'a, T>
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target { unsafe { self.0.pointer().as_ptr().as_ref() } }
+}
+
+impl<'a, T> Drop for Reading<'a, T>
+{
+    fn drop(&mut self)
+    {
+        unsafe {
+            self.0.try_consume_shared();
+        }
+    }
+}
+
+impl<'a, T> Clone for Reading<'a, T>
 {
     fn clone(&self) -> Self
     {
         if !self.0.account().try_lock_shared() {
             panic!()
         }
-        Self(self.0.clone())
+        Self(self.0.clone(), PhantomData)
     }
 }
 
-pub struct Writing<T>(RawRef<T>);
+pub struct Writing<'a, T>(RawRef<T>, PhantomData<&'a ()>);
 
-impl<T> Writing<T>
+impl<'a, T> Writing<'a, T>
 {
+    fn invariant(&self) { self.0.invariant(); }
+
     pub(crate) fn try_new(raw_ref: RawRef<T>) -> Option<Self>
     {
         raw_ref.invariant();
         if raw_ref.account().try_lock_exclusive() {
-            Some(Self(raw_ref))
+            let res = Self(raw_ref, PhantomData);
+            res.invariant();
+            Some(res)
         } else {
             None
+        }
+    }
+}
+
+impl<'a, T> Deref for Writing<'a, T>
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target { unsafe { self.0.pointer().as_ptr().as_ref() } }
+}
+
+impl<'a, T> DerefMut for Writing<'a, T>
+{
+    fn deref_mut(&mut self) -> &mut Self::Target { unsafe { self.0.pointer().as_ptr().as_mut() } }
+}
+
+impl<'a, T> Drop for Writing<'a, T>
+{
+    fn drop(&mut self)
+    {
+        unsafe {
+            self.0.try_consume_exclusive();
         }
     }
 }
