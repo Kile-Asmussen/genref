@@ -11,7 +11,6 @@ use std::{
     io::Read,
     marker::PhantomData,
     ops::{Deref, DerefMut},
-    os::linux::raw,
     ptr::NonNull,
 };
 
