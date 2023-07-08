@@ -10,13 +10,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-lazy_static = { version = "1.4.0", optional = true }
-parking_lot = { version = "0.12.1", optional = true }
-lock_api = { version = "0.4.7", optional = true }
+lazy_static = { version = "1.4.0" }
+parking_lot = { version = "0.12.1", features = ["nightly"] }
+lock_api = { version = "0.4.7" }
+bumpalo = { version = "3.12.0" }
 
 [toolchain]
 channel = "nightly"
-
-[features]
-default = ["global"]
-global = ["dep:lazy_static", "dep:parking_lot", "dep:lock_api"]
