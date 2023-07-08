@@ -17,6 +17,7 @@ use std::{
 use raw_ref::*;
 use tracking::{AccountEnum, Tracking};
 
+#[repr(transparent)]
 pub struct Strong<T>(RawRef<T>);
 
 impl<T> Strong<T>
@@ -93,6 +94,7 @@ impl<T> Drop for Strong<T>
     }
 }
 
+#[repr(transparent)]
 pub struct Weak<T>(RawRef<T>);
 impl<T> Clone for Weak<T>
 {
@@ -123,6 +125,7 @@ impl<T> Weak<T>
     pub fn try_write(&self) -> Option<Writing<T>> { Writing::try_new(self.0.clone()) }
 }
 
+#[repr(transparent)]
 struct GenRef<T>(RawRef<T>);
 pub enum GenRefEnum<T>
 {
@@ -130,6 +133,7 @@ pub enum GenRefEnum<T>
     Strong(Strong<T>),
 }
 
+#[repr(transparent)]
 pub struct Reading<'a, T>(RawRef<T>, PhantomData<&'a ()>);
 
 impl<'a, T> Reading<'a, T>
@@ -177,6 +181,7 @@ impl<'a, T> Clone for Reading<'a, T>
     }
 }
 
+#[repr(transparent)]
 pub struct Writing<'a, T>(RawRef<T>, PhantomData<&'a ()>);
 
 impl<'a, T> Writing<'a, T>
@@ -218,9 +223,15 @@ impl<'a, T> Drop for Writing<'a, T>
     }
 }
 
+#[repr(transparent)]
 pub struct Sendable<T>(Strong<T>);
+
+#[repr(transparent)]
 pub struct Shareable<T>(Weak<T>);
+
+#[repr(transparent)]
 pub struct Transferrable<T>(GenRef<T>);
+
 pub enum TransferrableEnum<T>
 {
     Sendable(Sendable<T>),

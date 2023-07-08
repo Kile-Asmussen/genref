@@ -127,6 +127,7 @@ impl<T> RawRef<T>
         res
     }
 
+    #[inline]
     unsafe fn try_consume(&self, locking_primitive: fn(&AccountEnum) -> bool) -> Option<Box<T>>
     {
         self.invariant();
