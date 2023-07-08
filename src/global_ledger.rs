@@ -19,16 +19,28 @@ impl Tracking for GlobalIndex
     unsafe fn unlock_shared(&self) { self.0.unlock_shared() }
 }
 
-#[derive(Debug, Clone)]
 struct GlobalAccount
 {
     lock: parking_lot::RawRwLock,
     generation: AtomicU64,
 }
 
+impl std::fmt::Debug for GlobalAccount
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result
+    {
+        f.debug_struct("GlobalAccount")
+            .field("generation", &self.generation)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Tracking for GlobalAccount
 {
-    fn generation(&self) -> u64 { self.generation.load(Ordering::Relaxed) & RawRef::COUNTER_MASK }
+    fn generation(&self) -> u64
+    {
+        self.generation.load(Ordering::Relaxed) & RawRef::<()>::COUNTER_MASK
+    }
 
     fn invalidate(&self) -> u64 { self.generation.fetch_add(1, Ordering::Relaxed) }
 
@@ -62,13 +74,13 @@ impl Tracking for GlobalAccount
     unsafe fn unlock_shared(&self) { self.lock.unlock_shared() }
 }
 
-pub(crate) fn allocate() -> GlobalIndex { recycle().or_else(fresh) }
+pub(crate) fn allocate() -> GlobalIndex { recycle().unwrap_or_else(fresh) }
 
 fn fresh() -> GlobalIndex
 {
     GlobalIndex(Box::leak(Box::new(GlobalAccount {
-        lock: RawRwLock::new(),
-        generation: AtomicU64::new(RawRef::COUNTER_INIT),
+        lock: parking_lot::RawRwLock::INIT,
+        generation: AtomicU64::new(RawRef::<()>::COUNTER_INIT),
     })) as &_)
 }
 

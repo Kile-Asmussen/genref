@@ -55,16 +55,25 @@ impl Tracking for AccountEnum
     fn try_lock_exclusive(&self) -> bool
     {
         match self {
-            Nil => (),
+            Nil => false,
             Self::Local(l) => l.try_lock_exclusive(),
             Self::Global(g) => g.try_lock_exclusive(),
+        }
+    }
+
+    fn lock_exclusive(&self)
+    {
+        match self {
+            Nil => (),
+            Self::Local(l) => l.lock_exclusive(),
+            Self::Global(l) => l.lock_exclusive(),
         }
     }
 
     fn try_lock_shared(&self) -> bool
     {
         match self {
-            Nil => (),
+            Nil => false,
             Self::Local(l) => l.try_lock_shared(),
             Self::Global(g) => g.try_lock_shared(),
         }
@@ -73,7 +82,7 @@ impl Tracking for AccountEnum
     fn try_upgrade(&self) -> bool
     {
         match self {
-            Nil => (),
+            Nil => false,
             Self::Local(l) => l.try_upgrade(),
             Self::Global(g) => g.try_upgrade(),
         }
@@ -98,7 +107,6 @@ impl Tracking for AccountEnum
     }
 }
 
-#[derive(Clone, Copy)]
 #[repr(C)]
 pub(crate) struct RawRef<T>
 {
@@ -106,6 +114,19 @@ pub(crate) struct RawRef<T>
     pointer: Option<NonNull<T>>,
     generation: u64,
 }
+
+impl<T> Clone for RawRef<T>
+{
+    fn clone(&self) -> Self
+    {
+        Self {
+            account: self.account.clone(),
+            pointer: self.pointer.clone(),
+            generation: self.generation.clone(),
+        }
+    }
+}
+impl<T> Copy for RawRef<T> {}
 
 pub(crate) enum PointerEnum<T>
 {
@@ -125,12 +146,12 @@ impl<T> RawRef<T>
         }
     }
 
-    fn is_nil(self) -> Self
+    fn is_nil(self) -> bool
     {
         self.generation == 0 && self.account.is_none() && self.pointer.is_none()
     }
 
-    pub(crate) fn is_non_nil(self) -> Self
+    pub(crate) fn is_non_nil(self) -> bool
     {
         self.generation != 0 && self.account.is_some() && self.pointer.is_some()
     }
@@ -147,12 +168,12 @@ impl<T> RawRef<T>
                 self.pointer.is_none(),
                 "zero generation on reference with non-nil pointer"
             );
-            return;
+            return self;
         }
 
-        let reference = self.generation && Self::REFERENCE_MASK;
-        let account = self.generation && Self::ACCOUNT_MASK;
-        let counter = self.generation && Self::COUNTER_MASK;
+        let reference = self.generation & Self::REFERENCE_MASK;
+        let account = self.generation & Self::ACCOUNT_MASK;
+        let counter = self.generation & Self::COUNTER_MASK;
 
         assert!(counter != 0, "flags set on nil generation count");
         assert!(account != 0, "no account flag on positive generation count");
@@ -197,8 +218,7 @@ impl<T> RawRef<T>
             pointer,
             generation,
         };
-        res.invaraint();
-        res
+        res.invariant()
     }
 
     pub(crate) fn new_from_box(mut it: Box<T>) -> Self
@@ -207,9 +227,8 @@ impl<T> RawRef<T>
             AccountEnum::Local(local_ledger::allocate()),
             PointerEnum::Strong(NonNull::from(it.as_mut())),
         );
-        res.invariant();
         mem::forget(it);
-        res
+        res.invariant()
     }
 
     pub(crate) fn account(self) -> AccountEnum
@@ -228,11 +247,10 @@ impl<T> RawRef<T>
 
     pub(crate) fn pointer(self) -> PointerEnum<T>
     {
-        self.invaraint();
-        if let Some(p) = self.pointer {
+        if let Some(p) = self.invariant().pointer {
             match self.generation & Self::REFERENCE_MASK {
                 STRONG_REFERENCE => PointerEnum::Strong(p),
-                WEAK_REFERENCE => PointerEnum::Wrak(p),
+                WEAK_REFERENCE => PointerEnum::Weak(p),
                 _ => panic!(),
             }
         } else {
@@ -254,19 +272,18 @@ impl<T> RawRef<T>
         self.invariant();
         self.generation &= !Self::ACCOUNT_MASK;
         self.generation |= Self::GLOBAL_ACCOUNT;
-        self.invariant();
-        self
+        self.invariant()
     }
 
     fn counter(self) -> u64 { self.generation & Self::COUNTER_MASK }
 
-    const FLAG_MASK: u64 = 0b1111.reverse_bits();
+    const FLAG_MASK: u64 = 0b1111u64.reverse_bits();
     pub(crate) const COUNTER_MASK: u64 = !Self::FLAG_MASK;
     pub(crate) const COUNTER_INIT: u64 = 1;
-    const GLOBAL_ACCOUNT: u64 = 0b0001.reverse_bits();
-    const LOCAL_ACCOUNT: u64 = 0b0010.reverse_bits();
+    const GLOBAL_ACCOUNT: u64 = 0b0001u64.reverse_bits();
+    const LOCAL_ACCOUNT: u64 = 0b0010u64.reverse_bits();
     const ACCOUNT_MASK: u64 = Self::GLOBAL_ACCOUNT | Self::LOCAL_ACCOUNT;
-    const STRONG_REFERENCE: u64 = 0b0100.reverse_bits();
-    const WEAK_REFERENCE: u64 = 0b1000.reverse_bits();
+    const STRONG_REFERENCE: u64 = 0b0100u64.reverse_bits();
+    const WEAK_REFERENCE: u64 = 0b1000u64.reverse_bits();
     const REFERENCE_MASK: u64 = Self::STRONG_REFERENCE | Self::WEAK_REFERENCE;
 }

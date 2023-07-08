@@ -10,13 +10,13 @@ pub(crate) struct LocalIndex(NonNull<RefCell<LocalAccount>>);
 
 impl LocalIndex
 {
-    fn borrow(&self) -> Ref<&LocalAccount> { unsafe { self.0.as_ref() }.borrow() }
+    fn borrow(&self) -> Ref<LocalAccount> { unsafe { self.0.as_ref() }.borrow() }
 
     // assumes exclusive lock
     pub(crate) unsafe fn make_sharable(&self)
     {
-        let cell = unsafe { self.0.as_ref() }.borrow_mut();
-        *cell = match cell {
+        let mut cell = self.0.as_ref().borrow_mut();
+        let acc = LocalAccount::Global(match &*cell {
             LocalAccount::Local(l) => {
                 let res = global_ledger::allocate();
                 if !res.try_lock_exclusive() {
@@ -24,8 +24,8 @@ impl LocalIndex
                 }
                 res
             }
-            LocalAccount::Global(g) => g,
-        };
+            LocalAccount::Global(g) => *g,
+        });
     }
 }
 
@@ -124,13 +124,13 @@ pub(crate) struct LocalCounter
 
 impl Tracking for LocalCounter
 {
-    fn generation(&self) -> u64 { self.generation.get() & RawRef::COUNTER_MASK }
+    fn generation(&self) -> u64 { self.generation.get() & RawRef::<()>::COUNTER_MASK }
 
     fn invalidate(&self) -> u64
     {
         let current = self.generation.get();
         self.generation.set(current + 1);
-        current & RawRef::COUNTER_MASK
+        current & RawRef::<()>::COUNTER_MASK
     }
 
     fn try_lock_exclusive(&self) -> bool
@@ -197,15 +197,15 @@ thread_local! {
     static FREE_LIST : RefCell<Vec<LocalIndex>> = RefCell::new(Vec::new());
 }
 
-pub(crate) fn allocate() -> LocalIndex { recycle().or_else(fresh) }
+pub(crate) fn allocate() -> LocalIndex { recycle().unwrap_or_else(fresh) }
 
 fn fresh() -> LocalIndex
 {
     ARENA.with_borrow_mut(|arena| {
         LocalIndex(NonNull::from(arena.alloc(RefCell::new(
             LocalAccount::Local(LocalCounter {
-                lock: 0,
-                generation: RawRef::COUNTER_INIT,
+                lock: 0.into(),
+                generation: RawRef::<()>::COUNTER_INIT.into(),
             }),
         ))))
     })
